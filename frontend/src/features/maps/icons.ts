@@ -15,7 +15,20 @@ const COLOURS: Record<PinKind, string> = {
 
 const LETTERS: Record<PinKind, string> = { pickup: 'A', start: 'A', destination: 'B', current: '' }
 
+const cache = new Map<string, L.DivIcon>()
+
+/** Icons are cached per kind and label so a re-render does not rebuild every marker. */
 export function pinIcon(kind: PinKind, label: string): L.DivIcon {
+  const k = `${kind}|${label}`
+  const hit = cache.get(k)
+  if (hit) return hit
+  const icon = buildPin(kind, label)
+  if (cache.size > 200) cache.clear()
+  cache.set(k, icon)
+  return icon
+}
+
+function buildPin(kind: PinKind, label: string): L.DivIcon {
   const colour = COLOURS[kind]
   const letter = LETTERS[kind]
   const body =

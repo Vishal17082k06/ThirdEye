@@ -17,6 +17,14 @@ export function RideStatusBadge({ status }: { status: Ride['status'] }) {
   return status === 'requested' ? <Badge tone="info">Requested</Badge> : <Badge tone="neutral">Cancelled</Badge>
 }
 
+export function SimulatedRideBadge() {
+  return (
+    <Badge tone="simulation" className="uppercase tracking-wide">
+      Simulated
+    </Badge>
+  )
+}
+
 export function FareLine({ ride }: { ride: Pick<Ride, 'mode' | 'fare_estimate' | 'fare_note'> }) {
   if (ride.mode === 'walk' || ride.fare_estimate == null) return <span>No fare for walking</span>
   return (
@@ -74,7 +82,10 @@ export function RideHistory() {
                     <Ticket className="h-5 w-5 text-primary" aria-hidden="true" />
                     {r.booking_id}
                   </p>
-                  <RideStatusBadge status={r.status} />
+                  <span className="flex items-center gap-2">
+                    {r.source === 'simulation' && <SimulatedRideBadge />}
+                    <RideStatusBadge status={r.status} />
+                  </span>
                 </div>
                 <p className="text-base text-ink">
                   <span className="font-semibold">{r.pickup.label}</span> to <span className="font-semibold">{r.destination.label}</span>

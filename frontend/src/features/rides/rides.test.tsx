@@ -134,6 +134,7 @@ describe('Book a Ride', () => {
       mode: 'walk',
       distance_m: 2100,
       duration_s: 1500,
+      source: 'live',
     })
     expect(screen.getByText('TE-20261030-0001')).toBeInTheDocument()
     expect(screen.getByText('Requested', { selector: 'span' })).toBeInTheDocument()
@@ -321,5 +322,48 @@ describe('Ride history and cancelling', () => {
     const list = await screen.findByRole('list', { name: 'Ride requests' })
     expect(within(list).getByText('TE-20261030-0001')).toBeInTheDocument()
     await act(async () => undefined)
+  })
+})
+
+describe('Ride source and stale errors', () => {
+  it('sends source live in Live mode', async () => {
+    const user = userEvent.setup()
+    const { api } = setup()
+    await planTrip(user)
+    await user.click(screen.getByRole('button', { name: 'Confirm ride request' }))
+    await screen.findByText('Ride request recorded')
+    expect(api.callsTo('POST', '/rides')[0].body).toMatchObject({ source: 'live' })
+  })
+
+  it('sends source simulation in Simulation mode and badges it SIMULATED', async () => {
+    const user = userEvent.setup()
+    const { api } = setup('simulation')
+    postHandler = () => ({ __status: 201, body: ride({ source: 'simulation' }) })
+    await user.click(screen.getByRole('button', { name: 'Use sample pickup (Gandhipuram)' }))
+    await pick(user, 'destination', 'Race Course')
+    await screen.findAllByText('2.1 km', { selector: 'span' })
+    await user.click(screen.getByRole('button', { name: 'Confirm ride request' }))
+    await screen.findByText('Ride request recorded')
+    expect(api.callsTo('POST', '/rides')[0].body).toMatchObject({ source: 'simulation', mode: 'car' })
+    expect(screen.getAllByText('Simulated').length).toBeGreaterThan(0)
+  })
+
+  it('history marks simulation rides SIMULATED and leaves live rides unmarked', async () => {
+    setup('live', {}, [ride({ id: 1, source: 'simulation' }), ride({ id: 2, booking_id: 'TE-20261030-0002', source: 'live' })])
+    const list = await screen.findByRole('list', { name: 'Ride requests' })
+    const items = within(list).getAllByRole('listitem')
+    expect(within(items[0]).getByText('Simulated')).toBeInTheDocument()
+    expect(within(items[1]).queryByText('Simulated')).not.toBeInTheDocument()
+  })
+
+  it('clears a rejection once the inputs change', async () => {
+    const user = userEvent.setup()
+    setup()
+    postHandler = () => fail(422, 'distance does not match the route')
+    await planTrip(user)
+    await user.click(screen.getByRole('button', { name: 'Confirm ride request' }))
+    expect(await screen.findByText('distance does not match the route')).toBeInTheDocument()
+    await user.click(screen.getByRole('radio', { name: /Bike/ }))
+    await waitFor(() => expect(screen.queryByText('distance does not match the route')).not.toBeInTheDocument())
   })
 })

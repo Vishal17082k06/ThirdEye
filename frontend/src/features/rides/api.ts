@@ -25,6 +25,8 @@ export interface Ride {
   status: RideStatus
   created_at: string
   disclaimer: string
+  /** Which mode the request was made in. Older records may not carry it. */
+  source?: 'live' | 'simulation'
 }
 
 export interface RideList {
@@ -40,6 +42,7 @@ export interface CreateRideInput {
   mode: RideMode
   distance_m: number
   duration_s: number
+  source: 'live' | 'simulation'
 }
 
 export const RIDES_KEY = ['rides'] as const
@@ -59,6 +62,7 @@ export function useCreateRide() {
         mode: input.mode,
         distance_m: input.distance_m,
         duration_s: input.duration_s,
+        source: input.source,
       }),
     onSuccess: () => qc.invalidateQueries({ queryKey: RIDES_KEY }),
   })

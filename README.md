@@ -50,6 +50,10 @@ The Emergency SOS feature emails the guardian through Gmail SMTP (`smtp.gmail.co
 
 Without these, SOS attempts are stored as `failed` ("Email service is not configured on the server.") and can be retried once configured. A SOS is marked `sent` only when Gmail's server accepts the message; that confirms hand-off, not that the guardian read it. Dev databases created before SOS gained its extra columns are upgraded automatically at startup.
 
+## Maps and OpenStreetMap usage
+
+Navigation and Book a Ride show OpenStreetMap tiles (`https://tile.openstreetmap.org`), with the required "OpenStreetMap contributors" attribution link kept visible on every map. The public OSM tile servers, Nominatim (search) and the public OSRM demo server are for **demo / low-volume use only** (see the [tile usage policy](https://operations.osmfoundation.org/policies/tiles/)): no bulk downloading, no heavy traffic, and a real User-Agent with a contact address (`NOMINATIM_USER_AGENT` in `backend/.env`). For anything beyond a demo, use a commercial tile provider or self-host tiles, geocoding and routing.
+
 ## Tests
 
 ```powershell

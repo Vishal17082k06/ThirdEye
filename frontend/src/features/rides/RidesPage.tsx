@@ -1,6 +1,6 @@
 import { useQueries } from '@tanstack/react-query'
 import { Bike, Car, CheckCircle2, FlaskConical, Footprints, Info, Ticket, type LucideIcon } from 'lucide-react'
-import { useId, useMemo, useState } from 'react'
+import { useEffect, useId, useMemo, useState } from 'react'
 import { Badge, Button, Card, CardHeader, Spinner } from '../../design'
 import { locateOnce, type GeoFailure } from '../../hooks/useGeolocation'
 import { ApiError } from '../../lib/api'
@@ -14,7 +14,7 @@ import { LocationField } from '../maps/LocationField'
 import { MapView, type MapMarker } from '../maps/MapView'
 import { usePlace } from '../maps/usePlace'
 import { RIDE_DISCLAIMER, useCreateRide, type Ride } from './api'
-import { FareLine, RideHistory, RideStatusBadge } from './RideHistory'
+import { FareLine, RideHistory, RideStatusBadge, SimulatedRideBadge } from './RideHistory'
 
 const MIN_SEPARATION_M = 50
 const SAMPLE_PICKUP: Place = { lat: 11.0183, lon: 76.9725, label: 'Gandhipuram, Coimbatore (sample pickup)' }
@@ -51,6 +51,13 @@ export function RidesPage() {
   const [confirmed, setConfirmed] = useState<Ride | null>(null)
   const create = useCreateRide()
   const typeName = useId()
+  const resetCreate = create.reset
+  // A rejection belongs to the inputs that were sent; once they change it is stale.
+  const from0 = pickup.place
+  const to0 = destination.place
+  useEffect(() => {
+    resetCreate()
+  }, [from0, to0, type, resetCreate])
 
   const from = pickup.place
   const to = destination.place
@@ -76,7 +83,7 @@ export function RidesPage() {
   if (from) markers.push({ lat: from.lat, lon: from.lon, label: `Pickup: ${from.label}`, kind: 'pickup' })
   if (to) markers.push({ lat: to.lat, lon: to.lon, label: `Destination: ${to.label}`, kind: 'destination' })
 
-  async function useCurrentLocation() {
+  async function locateAndPin() {
     setLocateError(null)
     setLocating(true)
     try {
@@ -104,6 +111,7 @@ export function RidesPage() {
         mode: type,
         distance_m: selectedRoute.distance_m,
         duration_s: selectedRoute.duration_s,
+        source: simulation ? 'simulation' : 'live',
       })
       setConfirmed(ride)
     } catch {
@@ -183,7 +191,7 @@ export function RidesPage() {
                 <div>
                   <dt className="text-sm text-muted">Status</dt>
                   <dd>
-                    <RideStatusBadge status={confirmed.status} />
+                    <RideStatusBadge status={confirmed.status} /> {confirmed.source === 'simulation' && <SimulatedRideBadge />}
                   </dd>
                 </div>
                 <div className="col-span-2 text-base text-ink">
@@ -209,7 +217,7 @@ export function RidesPage() {
                 useCurrent={
                   simulation
                     ? { label: 'Use sample pickup (Gandhipuram)', onClick: () => pickup.choose(SAMPLE_PICKUP) }
-                    : { label: 'Use current location', onClick: () => void useCurrentLocation(), busy: locating }
+                    : { label: 'Use current location', onClick: () => void locateAndPin(), busy: locating }
                 }
                 extra={
                   locateError ? (
