@@ -32,6 +32,7 @@ const DEVICE: Record<DeviceStatus, Shown> = {
   not_integrated: { label: 'Not integrated', tone: 'neutral' },
   not_started: { label: 'Not started', tone: 'neutral' },
   unknown: { label: 'Unknown', tone: 'neutral' },
+  error: { label: 'Error', tone: 'danger' },
 }
 
 const GPS: Record<GpsState, Shown> = {

@@ -1,6 +1,9 @@
 import { useMemo } from 'react'
+import { guardianIsSet, useGuardian } from '../account/useAccount'
+import { useDevices, type Device, type DeviceKey } from '../devices/useDevices'
+import { useRecentEvents, type ActivityEvent } from '../history/useEvents'
 
-export type DeviceStatus = 'connected' | 'disconnected' | 'not_integrated' | 'not_started' | 'unknown'
+export type DeviceStatus = 'connected' | 'disconnected' | 'not_integrated' | 'not_started' | 'unknown' | 'error'
 export type SosStatus = 'not_configured' | 'guardian_missing' | 'guardian_set'
 export type ActivitySource = 'live' | 'simulation' | 'hardware'
 
@@ -47,11 +50,52 @@ export const EMPTY_DASHBOARD: DashboardData = {
   recent: { obstacles: [], navigation: [], rides: [], emergencies: [] },
 }
 
+const toItem = (e: ActivityEvent): ActivityItem => ({
+  id: String(e.id),
+  title: e.title,
+  detail: e.status && e.status !== 'ok' ? `Status: ${e.status}` : undefined,
+  at: e.created_at,
+  source: e.source,
+})
+
 /**
- * Single seam for dashboard data. Task 6 (devices) and Task 7 (events) replace the
- * body with react-query calls and merge real values over these empty defaults; the
- * Dashboard component only reads the returned shape.
+ * Single seam for dashboard data: real devices, guardian and recent events from the API.
+ * While something is loading, or when nothing exists yet, the honest empty defaults stay;
+ * if the devices request itself fails, statuses show "Unknown" rather than a guess.
  */
 export function useDashboardData(): DashboardData {
-  return useMemo(() => EMPTY_DASHBOARD, [])
+  const devices = useDevices()
+  const guardian = useGuardian()
+  const obstacles = useRecentEvents('obstacle')
+  const navigation = useRecentEvents('navigation')
+  const rides = useRecentEvents('ride')
+  const sos = useRecentEvents('sos')
+
+  return useMemo(() => {
+    const byKey = new Map<DeviceKey, Device>((devices.data ?? []).map((d) => [d.key, d]))
+    const pick = (key: DeviceKey, fallback: DeviceStatus): DeviceStatus => {
+      const d = byKey.get(key)
+      if (d) return d.status
+      return devices.isError ? 'unknown' : fallback
+    }
+    const d = EMPTY_DASHBOARD.devices
+    return {
+      loading: devices.isPending,
+      devices: {
+        camera: pick('laptop_camera', d.camera),
+        distanceSensor: pick('vl53l0x', d.distanceSensor),
+        esp32Cam: pick('esp32_cam', d.esp32Cam),
+        vibrationMotor: pick('vibration_motor', d.vibrationMotor),
+        battery: pick('battery', d.battery),
+      },
+      aiAssistance: EMPTY_DASHBOARD.aiAssistance,
+      sos: guardian.data ? (guardianIsSet(guardian.data) ? 'guardian_set' : 'guardian_missing') : 'not_configured',
+      recent: {
+        obstacles: (obstacles.data?.items ?? []).map(toItem),
+        navigation: (navigation.data?.items ?? []).map(toItem),
+        rides: (rides.data?.items ?? []).map(toItem),
+        emergencies: (sos.data?.items ?? []).map(toItem),
+      },
+    }
+  }, [devices.data, devices.isError, devices.isPending, guardian.data, obstacles.data, navigation.data, rides.data, sos.data])
 }

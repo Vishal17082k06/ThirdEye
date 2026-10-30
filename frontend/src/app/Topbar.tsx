@@ -1,9 +1,8 @@
-import { Bell, Menu, ShieldAlert } from 'lucide-react'
+import { Menu, ShieldAlert } from 'lucide-react'
 import type { Ref } from 'react'
 import { Link } from 'react-router-dom'
-import { Popover } from '../design'
 import { VoiceButton } from '../features/voice/VoiceButton'
-import { useUnreadCount } from '../hooks/useUnreadCount'
+import { NotificationBell } from '../features/notifications/NotificationBell'
 import { ModeBadge } from './ModeBadge'
 import { UserMenu } from './UserMenu'
 
@@ -11,40 +10,6 @@ interface TopbarProps {
   menuButtonRef?: Ref<HTMLButtonElement>
   onOpenMobileNav: () => void
   mobileNavOpen: boolean
-}
-
-function NotificationBell() {
-  const unread = useUnreadCount()
-  return (
-    <Popover
-      label="Notifications"
-      trigger={(props) => (
-        <button
-          type="button"
-          {...props}
-          aria-label={unread > 0 ? `Notifications, ${unread} unread` : 'Notifications, none unread'}
-          className="bw relative flex h-[var(--control-h)] w-[var(--control-h)] items-center justify-center rounded-xl border-line-strong bg-surface text-ink hover:bg-surface-muted"
-        >
-          <Bell className="h-5 w-5" aria-hidden="true" />
-          {unread > 0 && (
-            <span className="absolute -right-1.5 -top-1.5 flex h-6 min-w-6 items-center justify-center rounded-full bg-danger px-1 text-xs font-bold text-white">
-              {unread > 99 ? '99+' : unread}
-            </span>
-          )}
-        </button>
-      )}
-    >
-      {() => (
-        <div>
-          <p className="font-bold text-ink">Notifications</p>
-          <p className="mt-1 text-sm text-muted">
-            {unread > 0 ? `${unread} unread.` : 'You have no notifications.'} Alerts about devices, SOS and rides will
-            appear here.
-          </p>
-        </div>
-      )}
-    </Popover>
-  )
 }
 
 export function Topbar({ onOpenMobileNav, mobileNavOpen, menuButtonRef }: TopbarProps) {
