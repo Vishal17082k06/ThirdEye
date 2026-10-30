@@ -1,4 +1,4 @@
-import { Bot, CalendarClock, Car, Cpu, Navigation, ShieldAlert } from 'lucide-react'
+import { Bot, CalendarClock, Car, Navigation, ShieldAlert } from 'lucide-react'
 import { Navigate, Route, Routes } from 'react-router-dom'
 import { ForgotPassword } from '../features/auth/ForgotPassword'
 import { Login } from '../features/auth/Login'
@@ -6,6 +6,7 @@ import { Register } from '../features/auth/Register'
 import { Dashboard } from '../features/dashboard/Dashboard'
 import { Profile } from '../features/profile/Profile'
 import { Settings as SettingsPage } from '../features/settings/Settings'
+import { Devices } from '../features/devices/Devices'
 import { PortalSelect } from '../features/portal/PortalSelect'
 import { PagePlaceholder } from './PagePlaceholder'
 import { ProtectedRoute, PublicOnlyRoute } from './ProtectedRoute'
@@ -30,7 +31,7 @@ export function AppRoutes() {
         <Route path="/ai" element={<PagePlaceholder title="AI Assistance" holds="live camera or image analysis with obstacle detection and spoken announcements" icon={Bot} />} />
         <Route path="/navigation" element={<PagePlaceholder title="Navigation" holds="a Coimbatore map with search, routes, and turn-by-turn steps" icon={Navigation} />} />
         <Route path="/rides" element={<PagePlaceholder title="Book a Ride" holds="ride requests with fare estimates and ride history" icon={Car} />} />
-        <Route path="/devices" element={<PagePlaceholder title="Device Management" holds="connection status and configuration for the camera, distance sensor, ESP32-CAM, vibration motor, and battery monitor" icon={Cpu} />} />
+        <Route path="/devices" element={<Devices />} />
         <Route path="/history" element={<PagePlaceholder title="Activity History" holds="a searchable, filterable log of detections, navigation, rides, and emergencies" icon={CalendarClock} />} />
         <Route path="/sos" element={<PagePlaceholder title="Emergency SOS" holds="the SOS trigger, guardian alerts, and SOS history" icon={ShieldAlert} />} />
         <Route path="/profile" element={<Profile />} />

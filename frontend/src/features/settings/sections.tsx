@@ -317,7 +317,9 @@ export function AccessibilitySection({ settings }: { settings: Settings['accessi
   const initial = { textSize: toTextSize(settings.textSize), highContrast: settings.highContrast, largeButtons: settings.largeButtons }
   const [v, setV] = useState(initial)
   const savedRef = useRef(settings)
-  savedRef.current = settings
+  useEffect(() => {
+    savedRef.current = settings
+  }, [settings])
 
   // Apply as the user changes things; leaving without saving restores what is stored.
   useEffect(() => {
