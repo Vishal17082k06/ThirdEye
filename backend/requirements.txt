@@ -1,0 +1,14 @@
+fastapi==0.162.0
+uvicorn[standard]==0.54.0
+SQLAlchemy==2.1.6
+pydantic-settings==2.16.2
+PyJWT==2.15.1
+bcrypt==5.0.0
+python-multipart==0.0.32
+email-validator==2.3.0
+httpx==0.28.1
+pillow==13.0.0
+numpy==2.4.6
+onnxruntime==1.31.1
+pytest==9.2.0
+tzdata==2026.6

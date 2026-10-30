@@ -1,0 +1,8 @@
+.superpowers/
+backend/.venv/
+__pycache__/
+node_modules/
+.env
+*.db
+backend/models/*.onnx
+dist/
