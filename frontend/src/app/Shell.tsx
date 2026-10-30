@@ -1,6 +1,8 @@
 import { useEffect, useRef, useState } from 'react'
 import { Outlet, useLocation } from 'react-router-dom'
+import { applyAccessibility } from '../lib/a11y'
 import { useEscapeLayer } from '../lib/escapeStack'
+import { toPrefs, useSettings } from '../lib/settings'
 import { Sidebar } from './Sidebar'
 import { Topbar } from './Topbar'
 
@@ -15,6 +17,12 @@ function readCollapsed(): boolean {
 }
 
 export function Shell() {
+  const settings = useSettings()
+  const a11y = settings.data?.accessibility
+  // Once settings load, the server copy is the source of truth for accessibility preferences.
+  useEffect(() => {
+    if (a11y) applyAccessibility(toPrefs(a11y))
+  }, [a11y])
   const [collapsed, setCollapsed] = useState(readCollapsed)
   const [mobileOpen, setMobileOpen] = useState(false)
   const location = useLocation()

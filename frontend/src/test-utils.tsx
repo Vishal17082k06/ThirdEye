@@ -1,3 +1,4 @@
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { render } from '@testing-library/react'
 import type { ReactElement } from 'react'
 import { MemoryRouter } from 'react-router-dom'
@@ -17,13 +18,16 @@ interface Options {
 
 /** Renders with the same providers as the real app, but with a known user/mode and an in-memory router. */
 export function renderApp(ui: ReactElement, { route = '/', user = TEST_USER, mode = null, realAuth = false }: Options = {}) {
+  const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false, gcTime: 0 } } })
   return render(
-    <MemoryRouter initialEntries={[route]}>
-      <ToastProvider>
-        <AuthProvider initialUser={realAuth ? undefined : user}>
-          <ModeProvider initialMode={mode}>{ui}</ModeProvider>
-        </AuthProvider>
-      </ToastProvider>
-    </MemoryRouter>,
+    <QueryClientProvider client={queryClient}>
+      <MemoryRouter initialEntries={[route]}>
+        <ToastProvider>
+          <AuthProvider initialUser={realAuth ? undefined : user}>
+            <ModeProvider initialMode={mode}>{ui}</ModeProvider>
+          </AuthProvider>
+        </ToastProvider>
+      </MemoryRouter>
+    </QueryClientProvider>,
   )
 }

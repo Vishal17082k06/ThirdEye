@@ -29,6 +29,8 @@ interface AuthContextValue {
   login: (email: string, password: string, remember: boolean) => Promise<void>
   register: (input: RegisterInput) => Promise<void>
   logout: () => void
+  /** Reflect a saved profile change in the signed-in user without another round trip. */
+  updateUser: (patch: Partial<User>) => void
 }
 
 const AuthContext = createContext<AuthContextValue | null>(null)
@@ -98,13 +100,18 @@ export function AuthProvider({
     setStatus('anonymous')
   }, [])
 
+  const updateUser = useCallback((patch: Partial<User>) => setUser((u) => (u ? { ...u, ...patch } : u)), [])
+
   // An expired or revoked token on any later request signs the user out; ProtectedRoute then redirects to /login.
   useEffect(() => {
     setUnauthorizedHandler(logout)
     return () => setUnauthorizedHandler(null)
   }, [logout])
 
-  const value = useMemo(() => ({ user, status, login, register, logout }), [user, status, login, register, logout])
+  const value = useMemo(
+    () => ({ user, status, login, register, logout, updateUser }),
+    [user, status, login, register, logout, updateUser],
+  )
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>
 }
 

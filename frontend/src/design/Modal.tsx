@@ -10,13 +10,15 @@ interface ModalProps {
   description?: string
   children?: ReactNode
   footer?: ReactNode
+  /** Wider panel for content such as event details. */
+  wide?: boolean
 }
 
 const FOCUSABLE =
   'a[href], button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])'
 
 /** Accessible dialog: focus moves in, Tab is trapped, Esc closes, focus returns to the opener. */
-export function Modal({ open, onClose, title, description, children, footer }: ModalProps) {
+export function Modal({ open, onClose, title, description, children, footer, wide }: ModalProps) {
   const panelRef = useRef<HTMLDivElement>(null)
   const titleId = useId()
   const descId = useId()
@@ -71,7 +73,7 @@ export function Modal({ open, onClose, title, description, children, footer }: M
         aria-labelledby={titleId}
         aria-describedby={description ? descId : undefined}
         tabIndex={-1}
-        className="bw relative w-full max-w-md rounded-t-2xl border-line bg-surface p-6 shadow-pop sm:rounded-2xl"
+        className={`bw relative max-h-[90vh] w-full ${wide ? 'max-w-2xl' : 'max-w-md'} overflow-y-auto rounded-t-2xl border-line bg-surface p-6 shadow-pop sm:rounded-2xl`}
       >
         <button
           type="button"

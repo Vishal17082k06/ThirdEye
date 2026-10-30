@@ -1,9 +1,11 @@
-import { Bot, CalendarClock, Car, Cpu, Navigation, Settings, ShieldAlert, UserRound } from 'lucide-react'
+import { Bot, CalendarClock, Car, Cpu, Navigation, ShieldAlert } from 'lucide-react'
 import { Navigate, Route, Routes } from 'react-router-dom'
 import { ForgotPassword } from '../features/auth/ForgotPassword'
 import { Login } from '../features/auth/Login'
 import { Register } from '../features/auth/Register'
 import { Dashboard } from '../features/dashboard/Dashboard'
+import { Profile } from '../features/profile/Profile'
+import { Settings as SettingsPage } from '../features/settings/Settings'
 import { PortalSelect } from '../features/portal/PortalSelect'
 import { PagePlaceholder } from './PagePlaceholder'
 import { ProtectedRoute, PublicOnlyRoute } from './ProtectedRoute'
@@ -31,8 +33,8 @@ export function AppRoutes() {
         <Route path="/devices" element={<PagePlaceholder title="Device Management" holds="connection status and configuration for the camera, distance sensor, ESP32-CAM, vibration motor, and battery monitor" icon={Cpu} />} />
         <Route path="/history" element={<PagePlaceholder title="Activity History" holds="a searchable, filterable log of detections, navigation, rides, and emergencies" icon={CalendarClock} />} />
         <Route path="/sos" element={<PagePlaceholder title="Emergency SOS" holds="the SOS trigger, guardian alerts, and SOS history" icon={ShieldAlert} />} />
-        <Route path="/profile" element={<PagePlaceholder title="Profile" holds="your account details and guardian contact" icon={UserRound} />} />
-        <Route path="/settings" element={<PagePlaceholder title="Settings" holds="camera, hardware, AI, voice, accessibility, and emergency preferences" icon={Settings} />} />
+        <Route path="/profile" element={<Profile />} />
+        <Route path="/settings" element={<SettingsPage />} />
           </Route>
         </Route>
       </Route>
