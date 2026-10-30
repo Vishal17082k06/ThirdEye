@@ -208,13 +208,13 @@ def test_post_event_with_notification(client, me):
             "type": "obstacle",
             "source": "simulation",
             "title": "Obstacle",
-            "notify": {"kind": "obstacle", "title": "Obstacle ahead", "body": "1 m"},
+            "notify": True,
         },
     )
     assert r.status_code == 201
     n = client.get("/api/notifications", headers=h).json()
     assert n["unread_count"] == 1
-    assert n["items"][0]["source"] == "simulation" and n["items"][0]["title"] == "Obstacle ahead"
+    assert n["items"][0]["source"] == "simulation" and n["items"][0]["title"] == "Obstacle"
 
 
 @pytest.mark.parametrize(
@@ -304,3 +304,70 @@ def test_notifications_isolated_between_users(client, me):
     assert client.get("/api/notifications", headers=other_h).json()["unread_count"] == 2
     assert client.delete("/api/notifications", headers=h).json() == {"deleted": 1}
     assert len(client.get("/api/notifications", headers=other_h).json()["items"]) == 2
+
+
+# ---------- fix round 1 ----------
+
+
+@pytest.mark.parametrize(
+    "body",
+    [
+        {"type": "device", "title": "x"},
+        {"type": "sos", "title": "x"},
+        {"type": "obstacle", "title": "x", "source": "hardware"},
+        {"type": "obstacle", "title": "x", "notify": {"kind": "a", "title": "b"}},
+        {"type": "obstacle", "title": "x", "details": {"x": "a" * 17000}},
+    ],
+)
+def test_post_event_restrictions_422(client, me, body):
+    h, _ = me
+    assert client.post("/api/events", headers=h, json=body).status_code == 422
+
+
+@pytest.mark.parametrize(
+    "etype,kind",
+    [
+        ("obstacle", "obstacle"),
+        ("navigation", "navigation"),
+        ("ride", "booking"),
+        ("camera_session", "system"),
+        ("ai_analysis", "system"),
+    ],
+)
+def test_post_event_notify_true_server_builds(client, me, etype, kind):
+    h, _ = me
+    r = client.post(
+        "/api/events",
+        headers=h,
+        json={"type": etype, "source": "simulation", "title": "Thing happened",
+              "details": {"distance": 1.5}, "notify": True},
+    )
+    assert r.status_code == 201
+    n = client.get("/api/notifications", headers=h).json()["items"][0]
+    assert n["kind"] == kind and n["source"] == "simulation"
+    assert n["title"] == "Thing happened" and n["body"]
+
+
+def test_post_event_notify_default_false(client, me):
+    h, _ = me
+    client.post("/api/events", headers=h, json={"type": "obstacle", "title": "x"})
+    assert client.get("/api/notifications", headers=h).json()["items"] == []
+
+
+def test_from_after_to_422(client, me):
+    h, _ = me
+    assert client.get("/api/events?from=2026-03-05&to=2026-03-01", headers=h).status_code == 422
+
+
+def test_extreme_dates_no_500(client, me):
+    h, uid = me
+    seed(client, uid)
+    assert client.get("/api/events?to=9999-12-31", headers=h).status_code == 200
+    assert client.get("/api/events?from=0001-01-01&to=9999-12-31", headers=h).json()["total"] == 1
+    assert client.get("/api/events?from=9999-12-31", headers=h).status_code == 200
+
+
+def test_settings_free_form_cap(client, me):
+    h, _ = me
+    r = client.put("/api/settings", headers=h, json={"ai": {"riskSettings": {"x": "a" * 17000}}})
+    assert r.status_code == 422

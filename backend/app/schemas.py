@@ -1,3 +1,4 @@
+import json
 import re
 import string
 from datetime import datetime, timezone
@@ -5,6 +6,7 @@ from typing import Annotated, Any, Literal, get_args
 
 from pydantic import (
     BaseModel,
+    AfterValidator,
     BeforeValidator,
     ConfigDict,
     EmailStr,
@@ -24,6 +26,30 @@ def _normalise_email(value: object) -> object:
 NormalisedEmail = Annotated[EmailStr, BeforeValidator(_normalise_email)]
 
 _PHONE_RE = re.compile(r"^\+?[0-9]{7,15}$")
+
+
+def _json_depth(value: object) -> int:
+    if isinstance(value, dict):
+        return 1 + max((_json_depth(v) for v in value.values()), default=0)
+    if isinstance(value, list):
+        return 1 + max((_json_depth(v) for v in value), default=0)
+    return 0
+
+
+def _json_cap(max_bytes: int, max_depth: int | None = None):
+    def check(value: dict[str, Any]) -> dict[str, Any]:
+        if len(json.dumps(value, separators=(",", ":"))) > max_bytes:
+            raise ValueError(f"JSON object must be at most {max_bytes} bytes")
+        if max_depth is not None and _json_depth(value) > max_depth:
+            raise ValueError(f"JSON object must be nested at most {max_depth} levels deep")
+        return value
+
+    return AfterValidator(check)
+
+
+# Free-form JSON objects clients may store: bounded so they cannot bloat the DB.
+JsonDict = Annotated[dict[str, Any], _json_cap(16384)]
+HeartbeatInfo = Annotated[dict[str, Any], _json_cap(4096, max_depth=3)]
 
 
 def _clean_phone(value: str) -> str:
@@ -177,18 +203,18 @@ class _Section(BaseModel):
 
 class CameraSettings(_Section):
     deviceId: str | None = None
-    preferences: dict[str, Any] = {}
+    preferences: JsonDict = {}
 
 
 class HardwareSettings(_Section):
     deviceIp: Annotated[str, Field(max_length=200)] = ""
     pollingIntervalMs: Annotated[int, Field(ge=100, le=60000)] = 1000
-    sensorSettings: dict[str, Any] = {}
+    sensorSettings: JsonDict = {}
 
 
 class AiSettings(_Section):
     confidenceThreshold: Annotated[float, Field(ge=0.05, le=0.95)] = 0.5
-    riskSettings: dict[str, Any] = {}
+    riskSettings: JsonDict = {}
     openaiVisionEnabled: bool = False
 
 
@@ -247,19 +273,23 @@ EVENT_TYPES: tuple[str, ...] = get_args(EventType)
 EVENT_SOURCES: tuple[str, ...] = get_args(EventSource)
 
 
-class NotifyIn(BaseModel):
-    kind: Annotated[str, Field(min_length=1, max_length=40)]
-    title: Annotated[str, Field(min_length=1, max_length=200)]
-    body: Annotated[str, Field(max_length=2000)] = ""
+# Clients may not create device events (device endpoints do) or sos events (the SOS
+# flow does), nor claim hardware as a source (only the heartbeat path can).
+ClientEventType = Literal[
+    "obstacle", "ai_analysis", "camera_session", "navigation", "ride", "distance_reading",
+]  # fmt: skip
+ClientEventSource = Literal["live", "simulation"]
 
 
 class EventCreate(BaseModel):
-    type: EventType
-    source: EventSource = "live"
+    model_config = ConfigDict(extra="forbid")
+
+    type: ClientEventType
+    source: ClientEventSource = "live"
     title: Annotated[str, Field(min_length=1, max_length=200)]
-    details: dict[str, Any] = {}
+    details: JsonDict = {}
     status: Annotated[str, Field(min_length=1, max_length=30)] = "ok"
-    notify: NotifyIn | None = None
+    notify: bool = False  # the server builds the notification from the event
 
 
 class EventOut(BaseModel):
@@ -322,7 +352,14 @@ class DeviceConfigUpdate(BaseModel):
     # extra="forbid": a body carrying "status" is rejected, never silently applied.
     model_config = ConfigDict(extra="forbid")
 
-    config: dict[str, Any]
+    config: JsonDict
+
+    @field_validator("config")
+    @classmethod
+    def no_last_info(cls, value: dict[str, Any]) -> dict[str, Any]:
+        if "lastInfo" in value:
+            raise ValueError("'lastInfo' is reserved for hardware heartbeats")
+        return value
 
 
 class DeviceReport(BaseModel):
@@ -334,7 +371,7 @@ class DeviceReport(BaseModel):
 
 class DeviceHeartbeat(BaseModel):
     source: str
-    info: dict[str, Any] = {}
+    info: HeartbeatInfo = {}
 
     @field_validator("source")
     @classmethod

@@ -1,10 +1,12 @@
+from datetime import datetime, timezone
+
 from fastapi import APIRouter, Depends, HTTPException, status
-from sqlalchemy import select
+from sqlalchemy import select, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from app.db import get_db
-from app.models import Device, User, utcnow
+from app.models import Device, User, UserSettings, utcnow
 from app.schemas import (
     DeviceConfigUpdate,
     DeviceHeartbeat,
@@ -27,6 +29,8 @@ SEED_DEVICES = (
 )
 BROWSER_REPORTED = "laptop_camera"
 HEARTBEAT_DEVICES = ("esp32_cam", "vl53l0x")
+MIN_HEARTBEAT_TIMEOUT_S = 15
+BROWSER_TIMEOUT_S = 60
 
 
 def _ensure_seeded(db: Session, user: User) -> list[Device]:
@@ -45,8 +49,78 @@ def _ensure_seeded(db: Session, user: User) -> list[Device]:
     return [rows[key] for key, _, _ in SEED_DEVICES]
 
 
+def _utc(value: datetime) -> datetime:
+    # SQLite returns naive datetimes; they are UTC.
+    return value.replace(tzinfo=timezone.utc) if value.tzinfo is None else value
+
+
+def _heartbeat_timeout_s(db: Session, user: User) -> float:
+    row = db.scalar(select(UserSettings).where(UserSettings.user_id == user.id))
+    polling_ms = ((row.data if row else {}) or {}).get("hardware", {}).get("pollingIntervalMs", 1000)
+    return max(MIN_HEARTBEAT_TIMEOUT_S, 3 * polling_ms / 1000)
+
+
+def _expire_stale(db: Session, user: User, devices: list[Device]) -> None:
+    """Persist 'connected -> disconnected/unknown' once for devices that went quiet.
+
+    The conditional UPDATE only matches while the row is still 'connected' with the
+    same last_seen, so when two requests notice the same staleness only one wins and
+    only the winner logs the event and notification.
+    """
+    now = utcnow()
+    hardware_timeout = None
+    for device in devices:
+        if device.status != "connected":
+            continue
+        if device.key in HEARTBEAT_DEVICES:
+            if hardware_timeout is None:
+                hardware_timeout = _heartbeat_timeout_s(db, user)
+            limit, new_status = hardware_timeout, "disconnected"
+        elif device.key == BROWSER_REPORTED:
+            limit, new_status = BROWSER_TIMEOUT_S, "unknown"
+        else:
+            continue
+        seen = _utc(device.last_seen) if device.last_seen else None
+        age = (now - seen).total_seconds() if seen else None
+        if age is not None and age <= limit:
+            continue
+        if device.key in HEARTBEAT_DEVICES:
+            error = (
+                f"No heartbeat for {int(age)}s (last seen {seen.isoformat().replace('+00:00', 'Z')})"
+                if seen
+                else "No heartbeat received"
+            )
+            source = "hardware"
+            title = "Sensor disconnected" if device.key == "vl53l0x" else "Camera disconnected"
+        else:
+            error, source, title = "Browser has not reported recently", "live", "Camera disconnected"
+        same_seen = Device.last_seen.is_(None) if device.last_seen is None else Device.last_seen == device.last_seen
+        won = db.execute(
+            update(Device)
+            .where(Device.id == device.id, Device.status == "connected", same_seen)
+            .values(status=new_status, error=error)
+        ).rowcount
+        if won != 1:  # another request already recorded it
+            db.rollback()
+            db.refresh(device)
+            continue
+        record_event(
+            db,
+            user.id,
+            "device",
+            title,
+            source=source,
+            details={"device": device.key, "from": "connected", "to": new_status, "error": error},
+            status="error",
+            notify={"kind": "device", "title": title, "body": error},
+        )
+        db.refresh(device)
+
+
 def _get_device(db: Session, user: User, key: str) -> Device:
-    for device in _ensure_seeded(db, user):
+    devices = _ensure_seeded(db, user)
+    _expire_stale(db, user, devices)
+    for device in devices:
         if device.key == key:
             return device
     raise HTTPException(status.HTTP_404_NOT_FOUND, "Unknown device")
@@ -93,7 +167,9 @@ def _set_status(
 def list_devices(
     user: User = Depends(get_current_user), db: Session = Depends(get_db)
 ) -> DeviceList:
-    return DeviceList(items=[DeviceOut.model_validate(d) for d in _ensure_seeded(db, user)])
+    devices = _ensure_seeded(db, user)
+    _expire_stale(db, user, devices)
+    return DeviceList(items=[DeviceOut.model_validate(d) for d in devices])
 
 
 @router.put("/{key}", response_model=DeviceOut)

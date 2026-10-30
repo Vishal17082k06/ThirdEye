@@ -208,13 +208,19 @@ def test_heartbeat_twice_updates_last_seen_one_event(client, h):
 
 def test_simulation_events_cannot_flip_status(client, h):
     before = devices(client, h)
-    for t in ("device", "distance_reading"):
-        r = client.post(
-            "/api/events",
-            headers=h,
-            json={"type": t, "source": "simulation", "title": "sim", "details": {"device": "vl53l0x"}},
-        )
-        assert r.status_code == 201
+    r = client.post(
+        "/api/events",
+        headers=h,
+        json={"type": "distance_reading", "source": "simulation", "title": "sim",
+              "details": {"device": "vl53l0x"}},
+    )
+    assert r.status_code == 201
+    # clients cannot post device events, or claim a hardware source, at all
+    for body in (
+        {"type": "device", "source": "simulation", "title": "sim"},
+        {"type": "distance_reading", "source": "hardware", "title": "sim"},
+    ):
+        assert client.post("/api/events", headers=h, json=body).status_code == 422
     r = client.post(
         "/api/devices/vl53l0x/heartbeat", headers=h, json={"source": "simulation", "info": {}}
     )
@@ -247,3 +253,125 @@ def test_devices_isolated_between_users(client, h):
     with client.session_factory() as db:
         assert db.scalars(select(Event).where(Event.user_id != 1)).all() == []
         assert db.scalars(select(Notification)).all() == []
+
+
+# ---------- staleness (fix round 1) ----------
+
+from datetime import datetime, timedelta, timezone  # noqa: E402
+
+
+def backdate(client, key, seconds, status="connected"):
+    with client.session_factory() as db:
+        d = db.scalars(select(Device).where(Device.key == key)).one()
+        d.status = status
+        d.last_seen = datetime.now(timezone.utc) - timedelta(seconds=seconds)
+        db.commit()
+
+
+def set_polling(client, h, ms):
+    assert client.put("/api/settings", headers=h, json={"hardware": {"pollingIntervalMs": ms}}).status_code == 200
+
+
+def test_hardware_fresh_heartbeat_stays_connected(client, h):
+    devices(client, h)
+    backdate(client, "vl53l0x", 10)
+    assert devices(client, h)["vl53l0x"]["status"] == "connected"
+
+
+def test_hardware_stale_becomes_disconnected_once(client, h):
+    devices(client, h)
+    backdate(client, "vl53l0x", 20)
+    d = devices(client, h)["vl53l0x"]
+    assert d["status"] == "disconnected"
+    assert d["error"].startswith("No heartbeat for ") and "last seen" in d["error"]
+    again = devices(client, h)["vl53l0x"]
+    assert again["status"] == "disconnected"
+    evs = events_of_type(client, h)
+    assert len(evs) == 1 and evs[0]["source"] == "hardware"
+    notes = client.get("/api/notifications", headers=h).json()
+    assert notes["unread_count"] == 1 and notes["items"][0]["title"] == "Sensor disconnected"
+
+
+def test_stale_threshold_scales_with_polling_interval(client, h):
+    devices(client, h)
+    set_polling(client, h, 10000)  # threshold = 30 s
+    backdate(client, "vl53l0x", 20)
+    assert devices(client, h)["vl53l0x"]["status"] == "connected"
+    backdate(client, "vl53l0x", 40)
+    assert devices(client, h)["vl53l0x"]["status"] == "disconnected"
+
+
+def test_stale_esp32_disconnected(client, h):
+    devices(client, h)
+    backdate(client, "esp32_cam", 60)
+    assert devices(client, h)["esp32_cam"]["status"] == "disconnected"
+
+
+def test_heartbeat_after_stale_reconnects_and_logs(client, h):
+    devices(client, h)
+    backdate(client, "vl53l0x", 60)
+    assert devices(client, h)["vl53l0x"]["status"] == "disconnected"
+    r = client.post(
+        "/api/devices/vl53l0x/heartbeat", headers=h, json={"source": "hardware", "info": {}}
+    )
+    assert r.json()["status"] == "connected" and r.json()["error"] is None
+    assert len(events_of_type(client, h)) == 3 - 1  # disconnected + connected
+
+
+def test_stale_applied_in_put_response(client, h):
+    devices(client, h)
+    backdate(client, "vl53l0x", 60)
+    r = client.put("/api/devices/vl53l0x", headers=h, json={"config": {"deviceIp": "1.1.1.1"}})
+    assert r.json()["status"] == "disconnected"
+
+
+def test_laptop_camera_stale_becomes_unknown(client, h):
+    devices(client, h)
+    backdate(client, "laptop_camera", 30)
+    assert devices(client, h)["laptop_camera"]["status"] == "connected"
+    backdate(client, "laptop_camera", 90)
+    d = devices(client, h)["laptop_camera"]
+    assert d["status"] == "unknown" and d["error"] == "Browser has not reported recently"
+    notes = client.get("/api/notifications", headers=h).json()
+    assert notes["items"][0]["title"] == "Camera disconnected"
+    r = client.post("/api/devices/laptop_camera/report", headers=h, json={"status": "connected"})
+    assert r.json()["status"] == "connected"
+
+
+def test_stale_transition_race_fires_once(client, h):
+    from app.routers import devices as dev_router
+    from app.models import User
+
+    devices(client, h)
+    backdate(client, "vl53l0x", 60)
+    with client.session_factory() as a, client.session_factory() as b:
+        user = a.get(User, 1)
+        da = dev_router._ensure_seeded(a, user)
+        db_ = dev_router._ensure_seeded(b, user)
+        dev_router._expire_stale(a, user, da)
+        dev_router._expire_stale(b, user, db_)
+    assert len(events_of_type(client, h)) == 1
+    assert client.get("/api/notifications", headers=h).json()["unread_count"] == 1
+
+
+# ---------- payload caps ----------
+
+
+def test_heartbeat_info_size_and_depth_caps(client, h):
+    url = "/api/devices/vl53l0x/heartbeat"
+    big = {"source": "hardware", "info": {"x": "a" * 5000}}
+    assert client.post(url, headers=h, json=big).status_code == 422
+    deep = {"source": "hardware", "info": {"a": {"b": {"c": {"d": 1}}}}}
+    assert client.post(url, headers=h, json=deep).status_code == 422
+    ok = {"source": "hardware", "info": {"a": {"b": {"c": 1}}}}
+    assert client.post(url, headers=h, json=ok).status_code == 200
+
+
+def test_put_config_cannot_set_last_info(client, h):
+    r = client.put("/api/devices/vl53l0x", headers=h, json={"config": {"lastInfo": {"x": 1}}})
+    assert r.status_code == 422
+
+
+def test_put_config_size_cap(client, h):
+    r = client.put("/api/devices/vl53l0x", headers=h, json={"config": {"x": "a" * 17000}})
+    assert r.status_code == 422

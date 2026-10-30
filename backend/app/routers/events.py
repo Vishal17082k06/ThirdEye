@@ -19,6 +19,24 @@ def _day_start(value: date) -> datetime:
     return datetime.combine(value, time.min, tzinfo=timezone.utc)
 
 
+_NOTIFY_KIND = {"obstacle": "obstacle", "navigation": "navigation", "ride": "booking"}
+
+
+def _build_notification(payload: EventCreate) -> dict[str, str]:
+    """Server-side notification text so clients cannot forge arbitrary alerts."""
+    facts = [
+        f"{k}: {v}"
+        for k, v in payload.details.items()
+        if isinstance(v, (str, int, float, bool))
+    ][:3]
+    body = ", ".join(facts)[:300] or f"Recorded in {payload.source} mode."
+    return {
+        "kind": _NOTIFY_KIND.get(payload.type, "system"),
+        "title": payload.title,
+        "body": body,
+    }
+
+
 @router.get("", response_model=EventList)
 def list_events(
     type: EventType | None = None,
@@ -44,7 +62,9 @@ def list_events(
         )
     if from_:
         conditions.append(Event.created_at >= _day_start(from_))
-    if to:  # inclusive: everything before the start of the following day
+    if from_ and to and from_ > to:
+        raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, "'from' must not be after 'to'")
+    if to and to < date.max:  # inclusive: before the start of the following day
         conditions.append(Event.created_at < _day_start(to + timedelta(days=1)))
     total = db.scalar(select(func.count()).select_from(Event).where(*conditions)) or 0
     rows = db.scalars(
@@ -89,5 +109,5 @@ def create_event(
         source=payload.source,
         details=payload.details,
         status=payload.status,
-        notify=payload.notify.model_dump() if payload.notify else None,
+        notify=_build_notification(payload) if payload.notify else None,
     )
