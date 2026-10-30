@@ -1,10 +1,11 @@
-import { Car, ShieldAlert } from 'lucide-react'
+import { ShieldAlert } from 'lucide-react'
 import { Navigate, Route, Routes } from 'react-router-dom'
 import { ForgotPassword } from '../features/auth/ForgotPassword'
 import { Login } from '../features/auth/Login'
 import { Register } from '../features/auth/Register'
 import { AiAssistance } from '../features/ai/AiAssistance'
 import { NavigationPage } from '../features/navigation/NavigationPage'
+import { RidesPage } from '../features/rides/RidesPage'
 import { Dashboard } from '../features/dashboard/Dashboard'
 import { Profile } from '../features/profile/Profile'
 import { Settings as SettingsPage } from '../features/settings/Settings'
@@ -33,7 +34,7 @@ export function AppRoutes() {
             <Route path="/dashboard" element={<Dashboard />} />
         <Route path="/ai" element={<AiAssistance />} />
         <Route path="/navigation" element={<NavigationPage />} />
-        <Route path="/rides" element={<PagePlaceholder title="Book a Ride" holds="ride requests with fare estimates and ride history" icon={Car} />} />
+        <Route path="/rides" element={<RidesPage />} />
         <Route path="/devices" element={<Devices />} />
         <Route path="/history" element={<History />} />
         <Route path="/sos" element={<PagePlaceholder title="Emergency SOS" holds="the SOS trigger, guardian alerts, and SOS history" icon={ShieldAlert} />} />
