@@ -1,0 +1,38 @@
+from pathlib import Path
+
+from pydantic import field_validator
+from pydantic_settings import BaseSettings, SettingsConfigDict
+
+BACKEND_DIR = Path(__file__).resolve().parent.parent
+
+# Used only when JWT_SECRET is unset or blank so local development works with
+# zero setup. Anyone can read this value in the repo, so it must never be
+# relied on outside development: set a real JWT_SECRET in backend/.env.
+DEV_JWT_SECRET = "dev-only-insecure-secret-do-not-use-in-production"
+
+
+class Settings(BaseSettings):
+    model_config = SettingsConfigDict(
+        env_file=BACKEND_DIR / ".env", env_file_encoding="utf-8", extra="ignore"
+    )
+
+    jwt_secret: str = DEV_JWT_SECRET
+    jwt_algorithm: str = "HS256"
+    token_expire_days: int = 1
+    token_expire_days_remember: int = 30
+    database_url: str = "sqlite:///./thirdeye.db"
+    gmail_user: str = ""
+    gmail_app_password: str = ""
+    openai_api_key: str = ""
+
+    @field_validator("jwt_secret", mode="before")
+    @classmethod
+    def blank_secret_uses_dev_default(cls, value: object) -> object:
+        # .env.example ships "JWT_SECRET=" (blank); an empty HMAC key would be
+        # worse than the dev default, so treat blank as "not set".
+        if value is None or (isinstance(value, str) and not value.strip()):
+            return DEV_JWT_SECRET
+        return value
+
+
+settings = Settings()
