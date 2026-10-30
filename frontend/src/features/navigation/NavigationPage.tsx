@@ -15,7 +15,7 @@ import {
   Volume2,
   type LucideIcon,
 } from 'lucide-react'
-import { useId, useMemo, useState } from 'react'
+import { useEffect, useId, useMemo, useState } from 'react'
 import { Badge, Button, Card, CardHeader, Spinner } from '../../design'
 import { cn } from '../../lib/cn'
 import { arrivalClock, formatDistance, formatDuration } from '../../lib/geo'
@@ -23,7 +23,8 @@ import { ErrorBanner } from '../auth/FormBanner'
 import type { RouteMode, RouteResult } from '../maps/api'
 import { LocationField } from '../maps/LocationField'
 import { MapView, type MapMarker } from '../maps/MapView'
-import { SIM_STEP_M, SIM_TICK_MS, useNavigation, type Progress } from './useNavigation'
+import { useNavigationState } from './navigationContext'
+import { SIM_STEP_M, SIM_TICK_MS, type Progress } from './useNavigation'
 import { useWhereAmI } from './useWhereAmI'
 
 const MODES: Array<{ id: RouteMode; label: string; verb: string; icon: LucideIcon }> = [
@@ -89,7 +90,9 @@ function RouteSummary({ route, verb, plannedAt, progress, navigating }: { route:
 }
 
 export function NavigationPage() {
-  const nav = useNavigation()
+  const nav = useNavigationState()
+  const { registerPage } = nav
+  useEffect(() => registerPage(), [registerPage])
   const whereAmI = useWhereAmI()
   const [picking, setPicking] = useState<Picking>(null)
   const [manualOpen, setManualOpen] = useState(false)
@@ -171,6 +174,7 @@ export function NavigationPage() {
             route={nav.latLngs}
             onSelect={picking ? onMapSelect : undefined}
             selecting={selectingText}
+            follow={navigating}
             className="h-[22rem] sm:h-[30rem] lg:h-[36rem]"
             ariaLabel="Map of Coimbatore showing your route"
           />
@@ -275,7 +279,7 @@ export function NavigationPage() {
                 onTogglePick={() => setPicking((p) => (p === 'start' ? null : 'start'))}
                 useCurrent={
                   simulation
-                    ? { label: 'Use sample start (Gandhipuram)', onClick: nav.useSimulatedStart }
+                    ? { label: 'Use sample start (Gandhipuram)', onClick: nav.chooseSimulatedStart }
                     : nav.gpsUsable
                       ? { label: 'Use my GPS location', onClick: () => { start.clear(); setManualOpen(false) } }
                       : undefined
@@ -315,6 +319,12 @@ export function NavigationPage() {
               </p>
             )}
 
+            {nav.lowAccuracy && (
+              <p role="status" className="text-sm font-semibold text-warning">
+                Low GPS accuracy: the latest position is too imprecise to follow, so guidance waits for a better fix.
+              </p>
+            )}
+
             <div className="flex flex-wrap gap-2">
               {!navigating ? (
                 <Button onClick={nav.startNavigation} disabled={!canStart} leftIcon={<NavigationIcon className="h-5 w-5" aria-hidden="true" />}>
@@ -336,7 +346,7 @@ export function NavigationPage() {
                 SIMULATED position: moves {SIM_STEP_M} m every {SIM_TICK_MS / 1000} s along the route. This is not GPS.
               </p>
             )}
-            {navigating && !simulation && <p className="text-sm text-muted">Navigation stops if you leave this page.</p>}
+            {navigating && <p className="text-sm text-muted">Navigation keeps running if you open another page. Press Stop navigation to end it.</p>}
           </Card>
         </div>
       </div>

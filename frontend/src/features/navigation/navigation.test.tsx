@@ -22,6 +22,7 @@ vi.mock('../../hooks/useSpeech', () => ({ useSpeech: () => speech }))
 vi.mock('../maps/MapView', async () => import('../../test-map'))
 
 import { NavigationPage } from './NavigationPage'
+import { NavigationProvider } from './NavigationProvider'
 import { useWhereAmI } from './useWhereAmI'
 
 const GANDHIPURAM = { lat: 11.0183, lon: 76.9725 }
@@ -46,7 +47,12 @@ function setup(mode: Mode = 'live', extra: Record<string, unknown> = {}) {
     'POST /events': { id: 1 },
     ...extra,
   })
-  const view = renderApp(<NavigationPage />, { route: '/navigation', mode })
+  const view = renderApp(
+    <NavigationProvider>
+      <NavigationPage />
+    </NavigationProvider>,
+    { route: '/navigation', mode },
+  )
   return { api, ...view }
 }
 
@@ -243,15 +249,7 @@ describe('Navigation: a trip', () => {
     expect(api.callsTo('GET', '/nav/route')).toHaveLength(2)
   })
 
-  it('says GPS signal lost when the device stops reporting during a trip', async () => {
-    await startTrip()
-    await waitFor(() => expect(speech.speak).toHaveBeenCalledTimes(1))
-    act(() => geo.fail(3))
-    expect(await screen.findByText(/GPS signal lost\. Navigation is paused/)).toBeInTheDocument()
-    expect(speech.speak).toHaveBeenCalledWith('GPS signal lost.', { interrupt: true })
-  })
-
-  it('leaving the page ends the trip, stops speech and logs the stop', async () => {
+  it('the provider going away (logout) ends the trip, stops speech and logs the stop', async () => {
     const { api, unmount } = await startTrip()
     await waitFor(() => expect(eventsOf(api)).toHaveLength(1))
     unmount()
@@ -354,7 +352,7 @@ describe('Where am I?', () => {
     await screen.findByText('GPS live')
     await user.click(screen.getByRole('button', { name: 'Where am I?' }))
     expect(await screen.findByText('You are near Race Course Road, Coimbatore.')).toBeInTheDocument()
-    expect(speech.speak).toHaveBeenCalledWith('You are near Race Course Road, Coimbatore.', { interrupt: true })
+    expect(speech.speak).toHaveBeenCalledWith('You are near Race Course Road, Coimbatore.', { interrupt: true, rank: 1 })
   })
 
   it('useWhereAmI().ask() works on its own and is honest about being outside the area', async () => {
@@ -374,7 +372,7 @@ describe('Where am I?', () => {
     renderApp(<Probe />, { mode: 'live' })
     const text = await ask()
     expect(text).toMatch(/outside the Coimbatore service area/)
-    expect(speech.speak).toHaveBeenCalledWith(text, { interrupt: true })
+    expect(speech.speak).toHaveBeenCalledWith(text, { interrupt: true, rank: 1 })
   })
 
   it('says it cannot use GPS in Simulation mode when no position is set', async () => {

@@ -19,7 +19,8 @@ export function useWhereAmI() {
 
   const ask = useCallback(async (): Promise<string> => {
     const say = (text: string): string => {
-      speak(text, { interrupt: true })
+      // rank 1: a spoken answer to a direct question outranks routine guidance (rank 0) and cannot be cut off by it
+      speak(text, { interrupt: true, rank: 1 })
       return text
     }
 

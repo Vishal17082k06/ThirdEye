@@ -5,6 +5,12 @@ import type { LatLngTuple } from '../maps/polyline'
 /** Pure route maths for turn-by-turn guidance. Nothing here touches React, the network or the clock. */
 
 export const ANNOUNCE_DISTANCE_M = 40
+/** Faster travel needs earlier warning: walking 40 m, bicycle 60 m, car 120 m before the manoeuvre. */
+export function announceDistanceFor(mode: 'foot' | 'bike' | 'car'): number {
+  return mode === 'car' ? 120 : mode === 'bike' ? 60 : ANNOUNCE_DISTANCE_M
+}
+/** A GPS fix less precise than this is drawn but never used to decide anything. */
+export const MAX_USABLE_ACCURACY_M = 100
 export const ARRIVED_DISTANCE_M = 25
 export const OFF_ROUTE_M = 50
 export const OFF_ROUTE_FIXES = 3

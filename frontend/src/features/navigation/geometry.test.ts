@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest'
 import { haversineM } from '../../lib/geo'
 import type { RouteStep } from '../maps/api'
 import {
+  announceDistanceFor,
   buildPath,
   currentStepIndex,
   distanceRemaining,
@@ -191,5 +192,13 @@ describe('trackOffRoute (reroute rules)', () => {
   })
   it('treats NaN distance as not off-route', () => {
     expect(trackOffRoute(INITIAL_OFF_ROUTE, NaN, 0).state.count).toBe(0)
+  })
+})
+
+describe('announceDistanceFor', () => {
+  it('scales the warning distance with the travel mode', () => {
+    expect(announceDistanceFor('foot')).toBe(40)
+    expect(announceDistanceFor('bike')).toBe(60)
+    expect(announceDistanceFor('car')).toBe(120)
   })
 })
