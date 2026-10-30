@@ -12,14 +12,28 @@ interface SpeakOptions {
   interrupt?: boolean
   /** Speak even if spoken feedback is switched off (explicit "Test voice" buttons). */
   force?: boolean
+  /** Risk rank of this speech, used to decide who may interrupt whom. */
+  rank?: number
 }
+
+/**
+ * The browser has one speech queue, so every useSpeech instance shares one record of what is being spoken.
+ * A lower-risk or unrelated speaker may not cancel an active high/critical announcement from someone else.
+ */
+interface Active {
+  owner: symbol
+  rank: number
+  utterance: object
+}
+let active: Active | null = null
 
 /**
  * Text-to-speech for announcements. It honours Settings > Voice (enabled, feedback, rate, voice).
  *
  * `announce` also de-duplicates: it returns true when the announcement is new (and was spoken if voice is on),
- * false when it was suppressed as a repeat. Callers mirror true results into an aria-live region so
- * screen-reader users hear exactly what sighted users read, even when speech output is off.
+ * false when it was suppressed as a repeat. An unchanged announcement is suppressed until its text changes or its
+ * risk escalates; the same text is never repeated within 6 s. Callers mirror true results into an aria-live region
+ * so screen-reader users hear exactly what sighted users read, even when speech output is off.
  */
 export function useSpeech() {
   const settings = useSettings().data?.voice
@@ -27,16 +41,21 @@ export function useSpeech() {
   const supported = !!synth && typeof SpeechSynthesisUtterance !== 'undefined'
   const voiceRef = useRef(settings)
   voiceRef.current = settings
-  const last = useRef(new Map<string, { at: number; rank: number }>())
+  const owner = useRef(Symbol('speech'))
+  const recent = useRef(new Map<string, { at: number; rank: number }>())
+  const lastOverall = useRef<{ text: string; rank: number } | null>(null)
   const [speaking, setSpeaking] = useState(false)
 
   const speak = useCallback(
-    (text: string, { interrupt = false, force = false }: SpeakOptions = {}): boolean => {
+    (text: string, { interrupt = false, force = false, rank = 0 }: SpeakOptions = {}): boolean => {
       if (!synth || typeof SpeechSynthesisUtterance === 'undefined') return false
       const v = voiceRef.current
       if (!force && !(v?.enabled && v.feedback)) return false
+      const busy = synth.speaking && active !== null
       // Low-priority speech never queues behind other speech: it is dropped instead.
       if (!interrupt && !force && synth.speaking) return false
+      // An interrupt from another speaker may only cut off speech of strictly lower risk.
+      if (!force && interrupt && busy && active!.owner !== owner.current && rank <= active!.rank) return false
       if (interrupt || force) synth.cancel()
       const u = new SpeechSynthesisUtterance(text)
       if (v) {
@@ -44,36 +63,60 @@ export function useSpeech() {
         const chosen = v.voiceName ? synth.getVoices?.().find((x) => x.name === v.voiceName) : undefined
         if (chosen) u.voice = chosen
       }
+      const mine: Active = { owner: owner.current, rank, utterance: u }
+      const done = () => {
+        if (active?.utterance === u) active = null
+        setSpeaking(false)
+      }
       u.onstart = () => setSpeaking(true)
-      u.onend = () => setSpeaking(false)
-      u.onerror = () => setSpeaking(false)
+      u.onend = done
+      u.onerror = done
+      active = mine
       synth.speak(u)
       return true
     },
     [synth],
   )
 
+  /** Cancels speech only if this instance started it. */
   const cancel = useCallback(() => {
-    synth?.cancel()
+    if (active && active.owner === owner.current) {
+      synth?.cancel()
+      active = null
+    }
     setSpeaking(false)
   }, [synth])
 
   const announce = useCallback(
     (text: string, risk: Risk | null, now: number = Date.now()): boolean => {
       const rank = risk ? RISK_RANK[risk] : -1
-      const prev = last.current.get(text)
+      const last = lastOverall.current
+      if (last && last.text === text && rank <= last.rank) return false
+      const prev = recent.current.get(text)
       if (prev && now - prev.at < DEDUPE_MS && rank <= prev.rank) return false
-      last.current.set(text, { at: now, rank })
-      speak(text, { interrupt: rank >= RISK_RANK.high })
+      recent.current.set(text, { at: now, rank })
+      lastOverall.current = { text, rank }
+      speak(text, { interrupt: rank >= RISK_RANK.high, rank: Math.max(rank, 0) })
       return true
     },
     [speak],
   )
 
-  const resetDedupe = useCallback(() => last.current.clear(), [])
+  const resetDedupe = useCallback(() => {
+    recent.current.clear()
+    lastOverall.current = null
+  }, [])
 
-  // Never leave speech running after the page or hook goes away.
-  useEffect(() => () => synth?.cancel(), [synth])
+  // Never leave this instance's speech running after the page or hook goes away.
+  useEffect(() => {
+    const me = owner.current
+    return () => {
+      if (active?.owner === me) {
+        synth?.cancel()
+        active = null
+      }
+    }
+  }, [synth])
 
   return { supported, speaking, speak, announce, cancel, resetDedupe, voiceEnabled: !!(settings?.enabled && settings.feedback) }
 }

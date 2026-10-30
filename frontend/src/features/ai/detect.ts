@@ -109,7 +109,7 @@ export function boxLabel(d: Detection): string {
 }
 
 /** Draws every detection box with colour, line style, and a text plate (label, confidence, position, risk). */
-export function drawDetections(ctx: CanvasRenderingContext2D, width: number, height: number, detections: Detection[]): void {
+export function drawDetections(ctx: CanvasRenderingContext2D, width: number, height: number, detections: Detection[], mirrored = false): void {
   ctx.clearRect(0, 0, width, height)
   const font = Math.max(14, Math.round(width / 48))
   ctx.font = `700 ${font}px system-ui, sans-serif`
@@ -136,9 +136,17 @@ export function drawDetections(ctx: CanvasRenderingContext2D, width: number, hei
     const pad = 4
     const textW = ctx.measureText(text).width + pad * 2
     const plateY = y - font - pad * 2 >= 0 ? y - font - pad * 2 : y
+    // When the whole canvas is flipped by CSS, flip each plate back about its own centre so text reads normally.
+    ctx.save()
+    if (mirrored) {
+      ctx.translate(x + textW / 2, 0)
+      ctx.scale(-1, 1)
+      ctx.translate(-(x + textW / 2), 0)
+    }
     ctx.fillStyle = meta.color
     ctx.fillRect(x, plateY, textW, font + pad * 2)
     ctx.fillStyle = '#ffffff'
     ctx.fillText(text, x + pad, plateY + pad)
+    ctx.restore()
   }
 }

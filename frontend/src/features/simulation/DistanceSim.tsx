@@ -45,6 +45,7 @@ export function DistanceSim() {
   useEffect(() => {
     if (!streaming) return
     const id = window.setInterval(() => {
+      if (document.hidden) return // no readings, spoken warnings or logs while the tab is in the background
       const step = (Math.random() - 0.5) * 120
       updateRef.current(walk.current + step)
     }, STREAM_MS)

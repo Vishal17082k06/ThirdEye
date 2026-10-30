@@ -86,7 +86,7 @@ export function AiAssistance() {
       setCurrent({ result, origin, text })
       const isNew = announce(text, risk)
       if (isNew || manual) {
-        if (isNew) setSpoken((s) => ({ text, assertive: risk === 'high' || risk === 'critical', n: s.n + 1 }))
+        setSpoken((s) => ({ text, assertive: risk === 'high' || risk === 'critical', n: s.n + 1 }))
         setHistory((h) =>
           [{ id: nextId.current++, at: Date.now(), text, risk, origin, source }, ...h].slice(0, HISTORY_LIMIT),
         )
@@ -279,11 +279,11 @@ export function AiAssistance() {
                 const v = e.currentTarget
                 if (v.videoWidth && v.videoHeight) setAspect(v.videoWidth / v.videoHeight)
               }}
-              className={`absolute inset-0 h-full w-full ${cameraActive ? '' : 'invisible'}`}
+              className={`absolute inset-0 h-full w-full object-fill ${cameraActive ? '' : 'invisible'}`}
               style={camera.mirror ? { transform: 'scaleX(-1)' } : undefined}
             />
             {cameraActive && shown && (
-              <DetectionCanvas detections={shown.result.detections} width={shown.result.image.width} height={shown.result.image.height} />
+              <DetectionCanvas detections={shown.result.detections} width={shown.result.image.width} height={shown.result.image.height} mirrored={camera.mirror} />
             )}
             {!cameraActive && (
               <div className="absolute inset-0 flex flex-col items-center justify-center gap-2 p-4 text-center text-white">
@@ -486,8 +486,8 @@ export function AiAssistance() {
 
       {/* Screen readers: urgent warnings interrupt, everything else waits its turn. */}
       <div className="sr-only">
-        <div aria-live="assertive" aria-atomic="true" data-testid="live-assertive">{spoken.assertive ? spoken.text : ''}</div>
-        <div aria-live="polite" aria-atomic="true" data-testid="live-polite">{spoken.assertive ? '' : spoken.text}</div>
+        <div aria-live="assertive" aria-atomic="true" data-testid="live-assertive">{spoken.assertive ? spoken.text + (spoken.n % 2 ? '' : '​') : ''}</div>
+        <div aria-live="polite" aria-atomic="true" data-testid="live-polite">{spoken.assertive ? '' : spoken.text + (spoken.n % 2 ? '' : '​')}</div>
       </div>
     </Section>
   )

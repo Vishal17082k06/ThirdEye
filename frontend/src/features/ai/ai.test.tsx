@@ -70,12 +70,16 @@ let fillText: ReturnType<typeof vi.fn>
 let strokeRect: ReturnType<typeof vi.fn>
 let stopTrack: ReturnType<typeof vi.fn>
 let speak: ReturnType<typeof vi.fn>
+let scale: ReturnType<typeof vi.fn>
+let scaleAtFirstDraw: number[] = []
 
 beforeEach(() => {
   fillText = vi.fn()
   strokeRect = vi.fn()
   stopTrack = vi.fn()
   speak = vi.fn()
+  scale = vi.fn()
+  scaleAtFirstDraw = []
   const ctx = {
     clearRect: vi.fn(),
     strokeRect,
@@ -84,8 +88,10 @@ beforeEach(() => {
     setLineDash: vi.fn(),
     measureText: () => ({ width: 50 }),
     translate: vi.fn(),
-    scale: vi.fn(),
-    drawImage: vi.fn(),
+    scale,
+    drawImage: vi.fn(() => scaleAtFirstDraw.push(scale.mock.calls.length)),
+    save: vi.fn(),
+    restore: vi.fn(),
   }
   HTMLCanvasElement.prototype.getContext = vi.fn(() => ctx) as unknown as typeof HTMLCanvasElement.prototype.getContext
   HTMLCanvasElement.prototype.toBlob = function (cb: BlobCallback) {
@@ -266,5 +272,40 @@ describe('AI Assistance page', () => {
     await waitFor(() => expect(detect.length).toBe(1))
     expect(detect[0]).toMatchObject({ record: 'true', type: 'image/jpeg' })
     expect(await screen.findByAltText('Preview of Captured from camera')).toBeInTheDocument()
+  })
+
+  it('never mirrors the uploaded frame; only the preview and the overlay are flipped together', async () => {
+    const { detect } = setup(() => PERSON, {
+      'GET /settings': { ...DEFAULT_SETTINGS, camera: { deviceId: null, preferences: { mirror: true } } },
+    })
+    renderApp(<AiAssistance />, { mode: 'live' })
+    await waitFor(() => expect(screen.getByLabelText('Live camera preview')).toHaveStyle({ transform: 'scaleX(-1)' }))
+    await startDetection()
+    await waitFor(() => expect(detect.length).toBe(1))
+    // the captured frame went through drawImage with no flip applied to it
+    expect(scaleAtFirstDraw[0]).toBe(0)
+    await waitFor(() => expect(document.querySelector('canvas[aria-hidden]')).toHaveStyle({ transform: 'scaleX(-1)' }))
+    expect(screen.getByLabelText('Live camera preview')).toHaveClass('object-fill')
+  })
+
+  it('leaves the overlay unflipped when mirror is off', async () => {
+    const { detect } = setup(() => PERSON)
+    renderApp(<AiAssistance />, { mode: 'live' })
+    await startDetection()
+    await waitFor(() => expect(detect.length).toBe(1))
+    await waitFor(() => expect(document.querySelector('canvas[aria-hidden]')).toBeInTheDocument())
+    expect(document.querySelector('canvas[aria-hidden]')).not.toHaveStyle({ transform: 'scaleX(-1)' })
+  })
+
+  it('a manual Analyse of an unchanged result still updates the live region', async () => {
+    setup(() => PERSON)
+    renderApp(<AiAssistance />, { mode: 'live' })
+    await userEvent.upload(screen.getByLabelText('Choose an image to analyse'), new File(['i'], 'a.jpg', { type: 'image/jpeg' }))
+    await userEvent.click(screen.getByRole('button', { name: 'Analyse' }))
+    await waitFor(() => expect(screen.getByTestId('live-assertive').textContent).toContain('Person detected ahead.'))
+    const first = screen.getByTestId('live-assertive').textContent
+    await userEvent.click(screen.getByRole('button', { name: 'Analyse' }))
+    await waitFor(() => expect(screen.getByTestId('live-assertive').textContent).not.toBe(first))
+    expect(within(screen.getByRole('list', { name: 'Detection history' })).getAllByRole('listitem')).toHaveLength(2)
   })
 })

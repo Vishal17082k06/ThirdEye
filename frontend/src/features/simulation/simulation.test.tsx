@@ -6,6 +6,7 @@ import { DEFAULT_SETTINGS, mockApi } from '../../test-api'
 import { renderApp } from '../../test-utils'
 import { AiAssistance } from '../ai/AiAssistance'
 import { proximityBand } from './proximity'
+import { SCENARIOS, scenarioResult } from './scenarios'
 import { TEST_VOICE_TEXT } from './SimulationSection'
 import { SosDryRun } from './SosDryRun'
 
@@ -34,6 +35,23 @@ beforeEach(() => {
 })
 afterEach(() => vi.unstubAllGlobals())
 
+describe('scenario wording', () => {
+  it('never reuses the phrases only the real detector may produce', () => {
+    for (const sc of SCENARIOS) {
+      for (const text of [sc.text, ...sc.detections.map((d) => d.announcement), scenarioResult(sc).summary.text]) {
+        expect(text).not.toBe('Path appears clear in the current camera view.')
+        expect(text).not.toBe('Vehicle approaching.')
+        expect(text.startsWith('Simulated:')).toBe(true)
+      }
+    }
+    expect(SCENARIOS.find((s) => s.id === 'clear')!.text).toBe('Simulated: no objects in this scenario.')
+  })
+  it('spoken distance warnings start with Simulated and the far band is worded honestly', () => {
+    for (const cm of [30, 80, 150]) expect(proximityBand(cm).warning.startsWith('Simulated')).toBe(true)
+    expect(proximityBand(300).warning).toBe('No simulated reading closer than 2 metres.')
+  })
+})
+
 describe('proximityBand', () => {
   it('maps distances to bands', () => {
     expect(proximityBand(30).risk).toBe('critical')
@@ -55,16 +73,17 @@ describe('Simulation tools on the AI page', () => {
     renderApp(<AiAssistance />, { mode: 'simulation' })
     await userEvent.selectOptions(screen.getByLabelText('Scenario'), 'Vehicle approaching')
     await userEvent.click(screen.getByRole('button', { name: 'Run scenario' }))
-    expect(screen.getByTestId('summary-text')).toHaveTextContent('Vehicle approaching.')
-    expect(screen.getByTestId('live-assertive')).toHaveTextContent('Vehicle approaching.')
+    expect(screen.getByTestId('summary-text')).toHaveTextContent('Simulated: vehicle ahead, getting closer.')
+    expect(screen.getByTestId('live-assertive')).toHaveTextContent('Simulated: vehicle ahead, getting closer.')
     expect(speak).toHaveBeenCalled()
     const history = screen.getByRole('list', { name: 'Detection history' })
     expect(within(history).getByText('Simulated')).toBeInTheDocument()
     await waitFor(() => expect(api.callsTo('POST', '/events')).toHaveLength(1))
     expect(api.callsTo('POST', '/events')[0].body).toMatchObject({
-      type: 'obstacle',
+      type: 'ai_analysis',
       source: 'simulation',
       notify: true,
+      details: { kind: 'scenario' },
     })
     expect(api.calls.some((c) => c.path === '/detect')).toBe(false)
     expect(api.calls.some((c) => c.path.startsWith('/devices'))).toBe(false)
@@ -89,7 +108,7 @@ describe('Simulation tools on the AI page', () => {
     const slider = screen.getByLabelText('Distance')
     fireEvent.change(slider, { target: { value: '40' } })
     expect(screen.getByTestId('distance-value')).toHaveTextContent('40 cm')
-    expect(screen.getByText('Stop. Obstacle very close.')).toBeInTheDocument()
+    expect(screen.getByText('Simulated: stop. Obstacle very close.')).toBeInTheDocument()
     expect(speak).toHaveBeenCalled()
     fireEvent.change(slider, { target: { value: '60' } })
     fireEvent.change(slider, { target: { value: '90' } })

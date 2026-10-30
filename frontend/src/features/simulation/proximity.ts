@@ -13,8 +13,8 @@ export interface Band {
 
 /** Maps a simulated distance to a proximity band and spoken warning. */
 export function proximityBand(cm: number): Band {
-  if (cm <= 50) return { risk: 'critical', label: 'Very close', warning: 'Stop. Obstacle very close.', speak: true }
-  if (cm <= 100) return { risk: 'high', label: 'Close', warning: 'Obstacle close ahead.', speak: true }
-  if (cm <= 200) return { risk: 'medium', label: 'Near', warning: 'Obstacle ahead.', speak: true }
-  return { risk: 'low', label: 'Far', warning: 'No obstacle within 2 metres in this simulated reading.', speak: false }
+  if (cm <= 50) return { risk: 'critical', label: 'Very close', warning: 'Simulated: stop. Obstacle very close.', speak: true }
+  if (cm <= 100) return { risk: 'high', label: 'Close', warning: 'Simulated: obstacle close ahead.', speak: true }
+  if (cm <= 200) return { risk: 'medium', label: 'Near', warning: 'Simulated: obstacle ahead.', speak: true }
+  return { risk: 'low', label: 'Far', warning: 'No simulated reading closer than 2 metres.', speak: false }
 }

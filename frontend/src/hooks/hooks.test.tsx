@@ -4,6 +4,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { DEFAULT_SETTINGS, mockApi } from '../test-api'
 import { renderApp } from '../test-utils'
 import { fitFrame, useCamera } from './useCamera'
+import { useMode } from '../lib/mode'
 import { useSpeech } from './useSpeech'
 
 const DEVICE = { key: 'laptop_camera', name: 'Laptop/USB Camera', status: 'connected', last_seen: null, config: {}, error: null }
@@ -151,6 +152,7 @@ function SpeechHarness({ now }: { now: { t: number } }) {
     <div>
       <button onClick={() => (document.title = String(s.announce('Person detected ahead.', 'medium', now.t)))}>a-medium</button>
       <button onClick={() => (document.title = String(s.announce('Person detected ahead.', 'critical', now.t)))}>a-critical</button>
+      <button onClick={() => (document.title = String(s.announce('Vehicle ahead.', 'medium', now.t)))}>a-other</button>
     </div>
   )
 }
@@ -178,6 +180,13 @@ describe('useSpeech', () => {
     await userEvent.click(screen.getByText('a-critical'))
     expect(document.title).toBe('true')
     expect(synth.cancel).toHaveBeenCalled() // critical interrupts
+    // unchanged after 7 s: still suppressed (an unchanged scene is not re-announced)
+    now.t += 7000
+    await userEvent.click(screen.getByText('a-critical'))
+    expect(document.title).toBe('false')
+    // text changed: announced; going back after the window announces again
+    await userEvent.click(screen.getByText('a-other'))
+    expect(document.title).toBe('true')
     now.t += 7000
     await userEvent.click(screen.getByText('a-critical'))
     expect(document.title).toBe('true')
@@ -199,5 +208,174 @@ describe('useSpeech', () => {
     await userEvent.click(screen.getAllByText('a-critical')[1])
     expect(document.title).toBe('true') // announced for the live region ...
     expect(off.speak).not.toHaveBeenCalled() // ... but not spoken
+  })
+})
+
+describe('useCamera stale requests and sessions', () => {
+  function deferred() {
+    let resolve!: (s: MediaStream) => void
+    const promise = new Promise<MediaStream>((r) => (resolve = r))
+    return { promise, resolve }
+  }
+
+  it('stop while the permission prompt is open: late stream is released and nothing is reported', async () => {
+    const d = deferred()
+    const { stream, track } = fakeStream()
+    stubMedia(() => d.promise)
+    const api = routes()
+    renderApp(<Harness />, { mode: 'live' })
+    await userEvent.click(screen.getByText('start'))
+    expect(screen.getByTestId('status')).toHaveTextContent('requesting')
+    await userEvent.click(screen.getByText('stop'))
+    await act(async () => d.resolve(stream))
+    expect(track.stop).toHaveBeenCalled()
+    expect(screen.getByTestId('status')).toHaveTextContent('idle')
+    expect(api.callsTo('POST', '/devices/laptop_camera/report')).toHaveLength(0)
+    expect(api.callsTo('POST', '/events')).toHaveLength(0)
+  })
+
+  it('unmount while pending: late stream is released and nothing is reported', async () => {
+    const d = deferred()
+    const { stream, track } = fakeStream()
+    stubMedia(() => d.promise)
+    const api = routes()
+    const view = renderApp(<Harness />, { mode: 'live' })
+    await userEvent.click(screen.getByText('start'))
+    view.unmount()
+    await act(async () => d.resolve(stream))
+    expect(track.stop).toHaveBeenCalled()
+    expect(api.callsTo('POST', '/devices/laptop_camera/report')).toHaveLength(0)
+    expect(api.callsTo('POST', '/events')).toHaveLength(0)
+  })
+
+  it('a late rejection after stop does not flip the status to an error', async () => {
+    let reject!: (e: unknown) => void
+    stubMedia(() => new Promise<MediaStream>((_, r) => (reject = r)))
+    const api = routes()
+    renderApp(<Harness />, { mode: 'live' })
+    await userEvent.click(screen.getByText('start'))
+    await userEvent.click(screen.getByText('stop'))
+    await act(async () => reject(Object.assign(new Error('x'), { name: 'NotAllowedError' })))
+    expect(screen.getByTestId('status')).toHaveTextContent('idle')
+    expect(api.callsTo('POST', '/devices/laptop_camera/report')).toHaveLength(0)
+  })
+
+  it('a failed start leaves no open session: a later stop logs no phantom session', async () => {
+    stubMedia(async () => Promise.reject(Object.assign(new Error('x'), { name: 'NotReadableError' })))
+    const api = routes()
+    renderApp(<Harness />, { mode: 'live' })
+    await userEvent.click(screen.getByText('start'))
+    await waitFor(() => expect(screen.getByTestId('status')).toHaveTextContent('error'))
+    await userEvent.click(screen.getByText('stop'))
+    expect(api.callsTo('POST', '/events')).toHaveLength(0)
+  })
+})
+
+function SwitchHarness() {
+  const cam = useCamera()
+  return (
+    <div>
+      <p data-testid="status">{cam.status}</p>
+      <video ref={cam.videoRef} />
+      <button onClick={() => void cam.start()}>start</button>
+      <button onClick={() => void cam.selectDevice('cam2')}>switch</button>
+      <button
+        onClick={async () => {
+          const b = await cam.captureFrame()
+          document.title = b.type
+        }}
+      >
+        capture
+      </button>
+    </div>
+  )
+}
+
+describe('useCamera sessions and capture', () => {
+  it('switching cameras logs the old session end and a new start, with no disconnect report', async () => {
+    const { stream } = fakeStream()
+    stubMedia(async () => stream)
+    const api = routes()
+    renderApp(<SwitchHarness />, { mode: 'live' })
+    await userEvent.click(screen.getByText('start'))
+    await waitFor(() => expect(screen.getByTestId('status')).toHaveTextContent('active'))
+    await userEvent.click(screen.getByText('switch'))
+    await waitFor(() => expect(api.callsTo('POST', '/events').length).toBe(3))
+    const titles = api.callsTo('POST', '/events').map((c) => (c.body as { title: string }).title)
+    expect(titles).toEqual(['Camera session started', 'Camera session ended', 'Camera session started'])
+    expect(api.callsTo('POST', '/events')[1].body).toMatchObject({ details: { reason: 'switched camera' } })
+    expect(api.callsTo('POST', '/devices/laptop_camera/report').every((c) => (c.body as { status: string }).status === 'connected')).toBe(true)
+  })
+
+  it('captureFrame never flips the image even with mirror on, and outputs JPEG at quality 0.8', async () => {
+    const { stream } = fakeStream()
+    stubMedia(async () => stream)
+    const scale = vi.fn()
+    const toBlob = vi.fn((cb: BlobCallback, _type?: string, _q?: number) => cb(new Blob(['x'], { type: 'image/jpeg' })))
+    HTMLCanvasElement.prototype.getContext = vi.fn(() => ({ scale, translate: vi.fn(), drawImage: vi.fn() })) as never
+    HTMLCanvasElement.prototype.toBlob = toBlob as never
+    Object.defineProperty(HTMLVideoElement.prototype, 'videoWidth', { configurable: true, get: () => 1920 })
+    Object.defineProperty(HTMLVideoElement.prototype, 'videoHeight', { configurable: true, get: () => 1080 })
+    routes({ 'GET /settings': { ...DEFAULT_SETTINGS, camera: { deviceId: null, preferences: { mirror: true } } } })
+    renderApp(<SwitchHarness />, { mode: 'live' })
+    await new Promise((r) => setTimeout(r, 50))
+    await userEvent.click(screen.getByText('start'))
+    await waitFor(() => expect(screen.getByTestId('status')).toHaveTextContent('active'))
+    await userEvent.click(screen.getByText('capture'))
+    await waitFor(() => expect(document.title).toBe('image/jpeg'))
+    expect(scale).not.toHaveBeenCalled()
+    expect(toBlob.mock.calls[0][1]).toBe('image/jpeg')
+    expect(toBlob.mock.calls[0][2]).toBe(0.8)
+  })
+
+  it('switching Live to Simulation while the camera runs reports the real camera as disconnected', async () => {
+    const { stream } = fakeStream()
+    stubMedia(async () => stream)
+    const api = routes()
+    function Switcher() {
+      const { setMode } = useMode()
+      return (
+        <>
+          <SwitchHarness />
+          <button onClick={() => setMode('simulation')}>to-sim</button>
+        </>
+      )
+    }
+    renderApp(<Switcher />, { mode: 'live' })
+    await userEvent.click(screen.getByText('start'))
+    await waitFor(() => expect(screen.getByTestId('status')).toHaveTextContent('active'))
+    await userEvent.click(screen.getByText('to-sim'))
+    await waitFor(() => expect(api.callsTo('POST', '/devices/laptop_camera/report').at(-1)?.body).toEqual({ status: 'disconnected' }))
+    const ev = api.callsTo('POST', '/events')
+    expect(ev.at(-2)?.body).toMatchObject({ title: 'Camera session ended', source: 'live' })
+    expect(ev.at(-1)?.body).toMatchObject({ title: 'Camera session started', source: 'simulation' })
+  })
+})
+
+describe('shared speech controller', () => {
+  function Two() {
+    const page = useSpeech()
+    const dist = useSpeech()
+    return (
+      <div>
+        <button onClick={() => page.announce('Person detected ahead.', 'critical', 1)}>page-critical</button>
+        <button onClick={() => dist.announce('Simulated: obstacle close ahead.', 'high', 1)}>dist-high</button>
+      </div>
+    )
+  }
+  it('a lower-risk speaker from another instance cannot cut off an active critical announcement', async () => {
+    const synth = { speak: vi.fn(), cancel: vi.fn(), getVoices: () => [], speaking: false }
+    vi.stubGlobal('speechSynthesis', synth)
+    vi.stubGlobal('SpeechSynthesisUtterance', function (this: { text: string }, t: string) { this.text = t })
+    routes()
+    renderApp(<Two />)
+    await new Promise((r) => setTimeout(r, 40))
+    await userEvent.click(screen.getByText('page-critical'))
+    expect(synth.speak).toHaveBeenCalledTimes(1)
+    synth.speaking = true
+    synth.cancel.mockClear()
+    await userEvent.click(screen.getByText('dist-high'))
+    expect(synth.cancel).not.toHaveBeenCalled()
+    expect(synth.speak).toHaveBeenCalledTimes(1)
   })
 })

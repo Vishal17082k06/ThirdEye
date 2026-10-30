@@ -2,6 +2,7 @@ import { CalendarClock, Cpu, FlaskConical, Radio, SearchX } from 'lucide-react'
 import { useMemo, useState } from 'react'
 import { Badge, Button, Card, EmptyState, Input, Modal, Select, Spinner } from '../../design'
 import { ApiError } from '../../lib/api'
+import { useMode } from '../../lib/mode'
 import { absoluteTime, relativeTime } from '../../lib/relativeTime'
 import { ErrorBanner } from '../auth/FormBanner'
 import {
@@ -81,7 +82,10 @@ function EventDetail({ event, onClose }: { event: ActivityEvent | null; onClose:
 
 export function History() {
   const [type, setType] = useState<EventType | ''>('')
-  const [source, setSource] = useState<EventSource | ''>('')
+  const { mode } = useMode()
+  // Each mode opens on its own data: Live never starts on simulation events, Simulation starts on simulation only.
+  const defaultSource: EventSource | '' = mode === 'simulation' ? 'simulation' : mode === 'live' ? 'live' : ''
+  const [source, setSource] = useState<EventSource | ''>(defaultSource)
   const [from, setFrom] = useState('')
   const [to, setTo] = useState('')
   const [search, setSearch] = useState('')
@@ -93,11 +97,11 @@ export function History() {
   const query = useEventsHistory(filters, !dateError)
   const items = query.data?.pages.flatMap((p) => p.items) ?? []
   const total = query.data?.pages[0]?.total ?? 0
-  const filtered = !!(type || source || q.trim() || from || to)
+  const filtered = !!(type || source !== defaultSource || q.trim() || from || to)
 
   function reset() {
     setType('')
-    setSource('')
+    setSource(defaultSource)
     setFrom('')
     setTo('')
     setSearch('')

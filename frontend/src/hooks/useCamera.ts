@@ -60,6 +60,9 @@ export function useCamera() {
   const streamRef = useRef<MediaStream | null>(null)
   const startedAt = useRef<number | null>(null)
   const keepalive = useRef<number | undefined>(undefined)
+  const mounted = useRef(true)
+  /** Bumped by every start/stop/unmount so a getUserMedia that resolves late can tell it is stale. */
+  const requestId = useRef(0)
   const [status, setStatus] = useState<CameraStatus>('idle')
   const [message, setMessage] = useState<string | null>(null)
   const [devices, setDevices] = useState<CameraInfo[]>([])
@@ -97,13 +100,13 @@ export function useCamera() {
     if (videoRef.current) videoRef.current.srcObject = null
   }, [])
 
-  const logSessionEnd = useCallback((reason: string) => {
+  const logSessionEnd = useCallback((reason: string, as: ClientEventSource = sourceRef.current) => {
     if (startedAt.current === null) return
     const seconds = Math.round((Date.now() - startedAt.current) / 1000)
     startedAt.current = null
     void postEvent({
       type: 'camera_session',
-      source: sourceRef.current,
+      source: as,
       title: 'Camera session ended',
       details: { durationSeconds: seconds, reason },
       status: 'stopped',
@@ -111,6 +114,7 @@ export function useCamera() {
   }, [])
 
   const stop = useCallback(() => {
+    requestId.current += 1
     const wasActive = streamRef.current !== null
     release()
     if (wasActive) {
@@ -126,6 +130,7 @@ export function useCamera() {
       const wasActive = streamRef.current !== null
       release()
       if (wasActive) logSessionEnd('error')
+      startedAt.current = null
       const d = describeCameraError(err)
       const text = override ?? d.message
       setStatus(d.status)
@@ -150,6 +155,7 @@ export function useCamera() {
         fail({ name: 'UnsupportedError' }, 'This browser cannot access cameras (it needs https or localhost).')
         return
       }
+      const token = ++requestId.current
       setStatus('requesting')
       setMessage(null)
       const wanted = deviceId ?? selectedDeviceId
@@ -160,6 +166,11 @@ export function useCamera() {
       }
       try {
         const s = await navigator.mediaDevices.getUserMedia({ video: Object.keys(video).length ? video : true })
+        if (!mounted.current || token !== requestId.current) {
+          // Stopped or left the page while the permission prompt was open: release the camera, change nothing.
+          s.getTracks().forEach((t) => t.stop())
+          return
+        }
         streamRef.current = s
         setStream(s)
         startedAt.current = Date.now()
@@ -176,6 +187,7 @@ export function useCamera() {
           }),
         )
       } catch (err) {
+        if (!mounted.current || token !== requestId.current) return
         fail(err)
       }
     },
@@ -186,12 +198,13 @@ export function useCamera() {
     async (deviceId: string) => {
       setChosen(deviceId)
       if (streamRef.current) {
-        // Switch cameras: close the old one quietly (no disconnect report), then open the new one.
+        // Switch cameras: end the old session (with its duration), then open the new one. No disconnect report.
         release()
+        logSessionEnd('switched camera')
         await start(deviceId)
       }
     },
-    [release, start],
+    [release, logSessionEnd, start],
   )
 
   // Attach the stream to the page's <video> whenever it changes.
@@ -219,6 +232,8 @@ export function useCamera() {
   // Always release the camera when the page goes away.
   useEffect(
     () => () => {
+      mounted.current = false
+      requestId.current += 1
       const wasActive = streamRef.current !== null
       release()
       if (wasActive) {
@@ -229,7 +244,27 @@ export function useCamera() {
     [release, logSessionEnd, sendReport],
   )
 
-  /** Current video frame as a JPEG (max 1280 px longest side, quality 0.8), mirrored if the setting is on. */
+  useEffect(() => {
+    mounted.current = true
+  }, [])
+
+  // Live -> Simulation while the camera runs: the real device is no longer in use by Live mode.
+  const prevSource = useRef(source)
+  useEffect(() => {
+    const before = prevSource.current
+    prevSource.current = source
+    if (before === 'live' && source === 'simulation' && streamRef.current) {
+      logSessionEnd('mode changed', 'live')
+      startedAt.current = Date.now()
+      void postEvent({ type: 'camera_session', source: 'simulation', title: 'Camera session started', status: 'started' })
+      void reportRef.current({ status: 'disconnected' }).catch(() => undefined)
+    }
+  }, [source, logSessionEnd])
+
+  /**
+   * Current video frame as a JPEG (max 1280 px longest side, quality 0.8). Never mirrored: only the preview is
+   * flipped, so the detector (and its left/right announcements) sees the true image.
+   */
   const captureFrame = useCallback(async (): Promise<Blob> => {
     const v = videoRef.current
     if (!v || !streamRef.current || !v.videoWidth || !v.videoHeight) throw new Error('The camera is not ready yet.')
@@ -239,15 +274,11 @@ export function useCamera() {
     canvas.height = height
     const ctx = canvas.getContext('2d')
     if (!ctx) throw new Error('Could not prepare the image.')
-    if (mirror) {
-      ctx.translate(width, 0)
-      ctx.scale(-1, 1)
-    }
     ctx.drawImage(v, 0, 0, width, height)
     return new Promise<Blob>((resolve, reject) =>
       canvas.toBlob((b) => (b ? resolve(b) : reject(new Error('Could not encode the image.'))), 'image/jpeg', FRAME_QUALITY),
     )
-  }, [mirror])
+  }, [])
 
   return { status, message, devices, selectedDeviceId, selectDevice, start, stop, captureFrame, videoRef, mirror, source }
 }

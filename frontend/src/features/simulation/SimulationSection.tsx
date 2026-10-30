@@ -27,10 +27,11 @@ export function SimulationSection({ onScenario }: { onScenario: (result: DetectR
     if (record) {
       const high = scenario.highest === 'high' || scenario.highest === 'critical'
       void postEvent({
-        type: 'obstacle',
+        // Not 'obstacle': scenario events must never appear in obstacle lists or counts.
+        type: 'ai_analysis',
         source: 'simulation',
         title: `Simulated scenario: ${scenario.name}`,
-        details: { simulated: true, scenario: scenario.id, highest_risk: scenario.highest, count: scenario.detections.length },
+        details: { kind: 'scenario', simulated: true, scenario: scenario.id, highest_risk: scenario.highest, count: scenario.detections.length },
         notify: high,
       })
     }

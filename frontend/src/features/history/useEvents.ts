@@ -1,6 +1,7 @@
 import { useInfiniteQuery, useQuery } from '@tanstack/react-query'
 import { useEffect, useState } from 'react'
 import { api } from '../../lib/api'
+import { useMode, type Mode } from '../../lib/mode'
 
 export type EventType =
   | 'obstacle'
@@ -90,11 +91,33 @@ export function useEventsHistory(filters: EventFilters, enabled = true) {
   })
 }
 
-/** A short list of recent events of one type, for the dashboard. */
+/** Sources a mode is allowed to show: Live never shows simulation data, Simulation shows only simulation data. */
+export function sourcesForMode(mode: Mode | null): EventSource[] {
+  if (mode === 'simulation') return ['simulation']
+  return ['live', 'hardware']
+}
+
+/**
+ * A short list of recent events of one type, for the dashboard, limited to the current mode's sources.
+ * The API takes one source per request, so Live mode asks for live and hardware separately and merges them.
+ */
 export function useRecentEvents(type: EventType, limit = 5) {
+  const { mode } = useMode()
+  const sources = sourcesForMode(mode)
   return useQuery({
-    queryKey: ['events', 'recent', type, limit],
-    queryFn: () => api.get<EventsPage>(`/events?${buildEventsQuery({ type, limit })}`),
+    queryKey: ['events', 'recent', type, limit, sources.join(',')],
+    queryFn: async (): Promise<EventsPage> => {
+      const pages = await Promise.all(
+        sources.map((source) => api.get<EventsPage>(`/events?${buildEventsQuery({ type, source, limit })}`)),
+      )
+      const seen = new Set<number>()
+      const items = pages
+        .flatMap((p) => p.items)
+        .filter((e) => sources.includes(e.source) && !seen.has(e.id) && seen.add(e.id))
+        .sort((a, b) => b.created_at.localeCompare(a.created_at))
+        .slice(0, limit)
+      return { items, total: items.length, limit, offset: 0 }
+    },
     refetchInterval: 30_000,
   })
 }
