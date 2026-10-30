@@ -1,4 +1,5 @@
 import re
+import string
 from typing import Annotated
 
 from pydantic import (
@@ -20,7 +21,7 @@ def _normalise_email(value: object) -> object:
 # Whitespace-trimmed, lowercased e-mail, validated for shape.
 NormalisedEmail = Annotated[EmailStr, BeforeValidator(_normalise_email)]
 
-_PHONE_RE = re.compile(r"^\+?\d{7,15}$")
+_PHONE_RE = re.compile(r"^\+?[0-9]{7,15}$")
 
 
 def _check_password_policy(password: str) -> str:
@@ -29,7 +30,9 @@ def _check_password_policy(password: str) -> str:
     if len(password.encode("utf-8")) > MAX_PASSWORD_BYTES:
         # bcrypt only reads the first 72 bytes; reject rather than silently truncate.
         raise ValueError(f"Password must be at most {MAX_PASSWORD_BYTES} bytes long")
-    if not any(c.isalpha() for c in password) or not any(c.isdigit() for c in password):
+    has_letter = any(c in string.ascii_letters for c in password)
+    has_digit = any(c in string.digits for c in password)
+    if not (has_letter and has_digit):
         raise ValueError("Password must contain at least one letter and one digit")
     return password
 

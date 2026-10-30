@@ -113,3 +113,70 @@ def test_remember_flag_gives_longer_expiry(client):
     long = client.post("/api/auth/login", json={**creds, "remember": True}).json()["token"]
     assert token_lifetime(short) <= timedelta(days=1, minutes=1)
     assert token_lifetime(long) > timedelta(days=29)
+
+
+# --- token edge cases -------------------------------------------------------
+
+def _forge(payload):
+    payload = {"exp": datetime.now(timezone.utc) + timedelta(hours=1), **payload}
+    return jwt.encode(payload, settings.jwt_secret, algorithm=settings.jwt_algorithm)
+
+
+def test_me_rejects_token_without_sub(client):
+    assert client.get("/api/auth/me", headers=auth_header(_forge({}))).status_code == 401
+
+
+def test_me_rejects_non_numeric_sub(client):
+    token = _forge({"sub": "abc"})
+    assert client.get("/api/auth/me", headers=auth_header(token)).status_code == 401
+
+
+def test_me_rejects_non_string_sub(client):
+    token = _forge({"sub": [1]})
+    assert client.get("/api/auth/me", headers=auth_header(token)).status_code == 401
+
+
+def test_me_rejects_token_for_deleted_user(client):
+    from app.models import User
+
+    body = register(client).json()
+    with client.session_factory() as db:
+        db.delete(db.get(User, body["user"]["id"]))
+        db.commit()
+    assert client.get("/api/auth/me", headers=auth_header(body["token"])).status_code == 401
+
+
+# --- bcrypt 72-byte limit ---------------------------------------------------
+
+def test_password_of_exactly_72_bytes_accepted(client):
+    assert register(client, password="a1" + "a" * 70).status_code == 201
+
+
+def test_password_of_73_bytes_rejected(client):
+    assert register(client, password="a1" + "a" * 71).status_code == 422
+
+
+def test_multibyte_password_straddling_limit(client):
+    # "e-acute" is 2 bytes: 2 + 35*2 = 72 bytes (ok); 2 + 36*2 = 74 bytes with
+    # only 38 characters, so only a byte-based check can reject it.
+    assert register(client, password="a1" + "é" * 35).status_code == 201
+    assert register(client, email="b@example.com", password="a1" + "é" * 36).status_code == 422
+
+
+# --- ASCII-only rules --------------------------------------------------------
+
+def test_arabic_indic_digits_in_phone_rejected(client):
+    assert register(client, phone="٠١٢٣٤٥٦٧٨٩").status_code == 422
+
+
+def test_non_ascii_letters_and_digits_do_not_satisfy_password_policy(client):
+    assert register(client, password="ééééééé١").status_code == 422
+
+
+# --- duplicate-email race ----------------------------------------------------
+
+def test_register_race_integrity_error_returns_409(client, monkeypatch):
+    assert register(client).status_code == 201
+    # Simulate the lookup missing the existing row (a concurrent sign-up):
+    monkeypatch.setattr("app.routers.auth._get_by_email", lambda db, email: None)
+    assert register(client).status_code == 409

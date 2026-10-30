@@ -46,7 +46,7 @@ def decode_token(token: str) -> int:
             options={"require": ["exp", "sub"]},
         )
         return int(payload["sub"])
-    except (jwt.PyJWTError, ValueError) as exc:
+    except (jwt.PyJWTError, ValueError, TypeError) as exc:
         raise ValueError("invalid token") from exc
 
 

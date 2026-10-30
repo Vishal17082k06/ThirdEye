@@ -16,6 +16,8 @@ class Settings(BaseSettings):
         env_file=BACKEND_DIR / ".env", env_file_encoding="utf-8", extra="ignore"
     )
 
+    # "dev" relaxes the secret guard; anything else (default) enforces it.
+    app_env: str = "production"
     jwt_secret: str = DEV_JWT_SECRET
     jwt_algorithm: str = "HS256"
     token_expire_days: int = 1
@@ -33,6 +35,16 @@ class Settings(BaseSettings):
         if value is None or (isinstance(value, str) and not value.strip()):
             return DEV_JWT_SECRET
         return value
+
+
+def check_jwt_secret(current: Settings) -> None:
+    """Refuse to run outside dev with the publicly known development secret."""
+    if current.app_env != "dev" and current.jwt_secret == DEV_JWT_SECRET:
+        raise RuntimeError(
+            "JWT_SECRET is not set (or is the development default) while APP_ENV is "
+            f"{current.app_env!r}. Set a strong JWT_SECRET in backend/.env, or set "
+            "APP_ENV=dev for local development."
+        )
 
 
 settings = Settings()

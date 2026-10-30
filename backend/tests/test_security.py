@@ -61,3 +61,40 @@ def test_tampered_token_rejected():
     forged = jwt.encode({"sub": "1"}, "another-secret-key-of-enough-length-1234", algorithm="HS256")
     with pytest.raises(ValueError):
         decode_token(forged)
+
+
+def test_dev_secret_refused_outside_dev():
+    from app.config import DEV_JWT_SECRET, Settings, check_jwt_secret
+
+    with pytest.raises(RuntimeError, match="JWT_SECRET"):
+        check_jwt_secret(Settings(app_env="production", jwt_secret=""))
+    with pytest.raises(RuntimeError):
+        check_jwt_secret(Settings(app_env="production", jwt_secret=DEV_JWT_SECRET))
+    check_jwt_secret(Settings(app_env="dev", jwt_secret=""))
+    check_jwt_secret(Settings(app_env="production", jwt_secret="x" * 48))
+
+
+def test_app_startup_runs_secret_guard(monkeypatch):
+    from fastapi.testclient import TestClient
+
+    from app.main import app
+
+    monkeypatch.setattr(settings, "app_env", "production")
+    with pytest.raises(RuntimeError, match="JWT_SECRET"):
+        with TestClient(app):
+            pass
+
+
+def test_default_app_env_is_production(monkeypatch):
+    from app.config import Settings
+
+    monkeypatch.delenv("APP_ENV", raising=False)
+    assert Settings(_env_file=None).app_env == "production"
+
+
+def test_non_integer_sub_rejected():
+    for sub in ("abc", [1], None):
+        token = jwt.encode({"sub": sub, "exp": datetime.now(timezone.utc) + timedelta(hours=1)},
+                           settings.jwt_secret, algorithm=settings.jwt_algorithm)
+        with pytest.raises(ValueError):
+            decode_token(token)
