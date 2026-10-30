@@ -6,7 +6,8 @@ from fastapi import FastAPI
 from app import models  # noqa: F401  (registers tables on Base.metadata)
 from app.config import check_jwt_secret, settings
 from app.db import Base, engine
-from app.routers import auth
+from app.routers import auth, profile
+from app.routers import settings as settings_router
 
 
 @asynccontextmanager
@@ -18,6 +19,8 @@ async def lifespan(_: FastAPI) -> AsyncIterator[None]:
 
 app = FastAPI(title="Third Eye", lifespan=lifespan)
 app.include_router(auth.router, prefix="/api")
+app.include_router(profile.router, prefix="/api")
+app.include_router(settings_router.router, prefix="/api")
 
 
 @app.get("/api/health")
