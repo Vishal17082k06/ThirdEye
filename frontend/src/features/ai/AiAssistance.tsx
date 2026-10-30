@@ -12,6 +12,7 @@ import { findApproaching, withApproach } from './approach'
 import { detectImage, EngineUnavailableError, validateImageFile, type Detection, type DetectResult } from './detect'
 import { DetectionCanvas } from './DetectionCanvas'
 import { DetectionList, HonestyNote, RiskBadge, RiskLegend, SimulatedBadge } from './parts'
+import { aiController, useAiControllerState, type AiResult } from './aiController'
 import { useDetectionLoop } from './useDetectionLoop'
 import { SimulationSection } from '../simulation/SimulationSection'
 
@@ -137,6 +138,54 @@ export function AiAssistance() {
     resetDedupe()
     setDetecting(true)
   }
+
+  /* ---------- commands from the voice assistant (see aiController) ---------- */
+  const voiceRef = useRef({ camera, detecting, startDetection })
+  voiceRef.current = { camera, detecting, startDetection }
+  const gesturePrompt = useAiControllerState().gesturePrompt
+
+  useEffect(() => {
+    aiController.publishStatus({ camera: camera.status, detecting })
+    if (camera.status === 'active') aiController.setGesturePrompt(null)
+  }, [camera.status, detecting])
+
+  useEffect(() => {
+    const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms))
+    const camNow = () => voiceRef.current.camera
+    /** Starts the camera and waits for the real outcome (the permission prompt may stay open for a while). */
+    async function bringUpCamera(): Promise<AiResult> {
+      if (camNow().status === 'active') return { ok: true, message: 'The camera is already on.' }
+      void voiceRef.current.camera.start()
+      await sleep(150)
+      for (let waited = 0; camNow().status === 'requesting' && waited < 30_000; waited += 100) await sleep(100)
+      if (camNow().status === 'active') return { ok: true, message: 'The camera is on.' }
+      const why = voiceRef.current.camera.message
+      // Some browsers only open the camera from a tap: leave a visible "Start camera" prompt on the page.
+      aiController.setGesturePrompt(why ?? 'The browser did not start the camera. Use the Start camera button.')
+      return { ok: false, message: `${why ?? 'The browser did not start the camera.'} Tap Start camera on the AI Assistance page.` }
+    }
+    return aiController.attach(async (command) => {
+      switch (command) {
+        case 'startCamera':
+          return bringUpCamera()
+        case 'stopCamera':
+          if (voiceRef.current.camera.status !== 'active') return { ok: true, message: 'The camera is already off.' }
+          voiceRef.current.camera.stop()
+          return { ok: true, message: 'The camera is off.' }
+        case 'startDetection': {
+          const cam = await bringUpCamera()
+          if (!cam.ok) return { ok: false, message: `Obstacle detection was not started. ${cam.message}` }
+          if (voiceRef.current.detecting) return { ok: true, message: 'Obstacle detection is already on.' }
+          voiceRef.current.startDetection()
+          return { ok: true, message: 'Obstacle detection is on.' }
+        }
+        case 'stopDetection':
+          if (!voiceRef.current.detecting) return { ok: true, message: 'Obstacle detection is already off.' }
+          setDetecting(false)
+          return { ok: true, message: 'Obstacle detection is off.' }
+      }
+    })
+  }, [])
 
   /* ---------- still image analysis (upload and capture) ---------- */
   const [image, setImage] = useState<{ blob: Blob; url: string; name: string; origin: Origin } | null>(null)
@@ -305,6 +354,15 @@ export function AiAssistance() {
           </div>
 
           {camera.message && <div className="mt-3"><ErrorBanner message={camera.message} /></div>}
+          {gesturePrompt && !cameraActive && (
+            <div role="status" className="bw mt-3 rounded-xl border-line-strong bg-surface-muted p-3 text-sm">
+              <p className="font-semibold text-ink">Voice assistant asked to start the camera</p>
+              <p className="mt-1 text-muted">{gesturePrompt} Press the button to start it yourself.</p>
+              <Button className="mt-2" onClick={() => void camera.start()} leftIcon={<Camera className="h-5 w-5" aria-hidden="true" />}>
+                Start camera
+              </Button>
+            </div>
+          )}
           {loopError && <div className="mt-3"><ErrorBanner message={loopError} /></div>}
 
           {camera.devices.length > 1 && (
