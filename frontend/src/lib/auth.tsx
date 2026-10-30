@@ -1,5 +1,5 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useState, type ReactNode } from 'react'
-import { api, ApiError } from './api'
+import { api, ApiError, setUnauthorizedHandler } from './api'
 import { clearToken, getToken, setToken } from './token'
 
 export interface User {
@@ -97,6 +97,12 @@ export function AuthProvider({
     setUser(null)
     setStatus('anonymous')
   }, [])
+
+  // An expired or revoked token on any later request signs the user out; ProtectedRoute then redirects to /login.
+  useEffect(() => {
+    setUnauthorizedHandler(logout)
+    return () => setUnauthorizedHandler(null)
+  }, [logout])
 
   const value = useMemo(() => ({ user, status, login, register, logout }), [user, status, login, register, logout])
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>

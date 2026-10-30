@@ -28,6 +28,17 @@ export function normaliseDetail(detail: unknown, fallback: string): string {
   return fallback
 }
 
+type UnauthorizedHandler = () => void
+let unauthorizedHandler: UnauthorizedHandler | null = null
+
+/** AuthProvider registers this so any 401 on an authenticated call signs the user out. */
+export function setUnauthorizedHandler(fn: UnauthorizedHandler | null): void {
+  unauthorizedHandler = fn
+}
+
+// Credential endpoints legitimately return 401 ("wrong password"); that is not an expired session.
+const SKIP_UNAUTHORIZED = ['/auth/login', '/auth/register', '/auth/forgot-password']
+
 async function request<T>(method: string, path: string, body?: unknown): Promise<T> {
   const headers: Record<string, string> = { Accept: 'application/json' }
   const token = getToken()
@@ -56,6 +67,7 @@ async function request<T>(method: string, path: string, body?: unknown): Promise
   }
 
   if (!res.ok) {
+    if (res.status === 401 && !SKIP_UNAUTHORIZED.includes(path)) unauthorizedHandler?.()
     const detail = (data as { detail?: unknown } | null)?.detail
     throw new ApiError(res.status, normaliseDetail(detail, `Request failed (${res.status}).`))
   }

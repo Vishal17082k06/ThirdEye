@@ -4,7 +4,10 @@ const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/
 const PHONE_RE = /^\+?[0-9]{7,15}$/
 
 export function validateName(value: string): string | undefined {
-  return value.trim() ? undefined : 'Enter your full name.'
+  const v = value.trim()
+  if (!v) return 'Enter your full name.'
+  if (v.length > 120) return 'Name must be 120 characters or fewer.'
+  return undefined
 }
 
 export function validateEmail(value: string): string | undefined {

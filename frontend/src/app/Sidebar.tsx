@@ -73,7 +73,7 @@ export function Sidebar({ collapsed, onToggleCollapsed, mobileOpen, onCloseMobil
             onClick={onToggleCollapsed}
             aria-expanded={!collapsed}
             aria-controls="app-sidebar"
-            aria-label={collapsed ? 'Expand sidebar' : 'Collapse sidebar'}
+            aria-label="Collapse sidebar"
             title={collapsed ? 'Expand sidebar' : 'Collapse sidebar'}
             className="flex min-h-[var(--control-h)] w-full items-center gap-3 rounded-xl px-3 text-base font-semibold text-muted hover:bg-surface-muted hover:text-ink lg:group-data-[collapsed=true]/side:justify-center lg:group-data-[collapsed=true]/side:px-0"
           >

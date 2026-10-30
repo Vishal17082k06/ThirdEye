@@ -24,7 +24,7 @@
   --surface: #ffffff;
   --surface-muted: #f1f5f9;
   --border: #e2e8f0;
-  --border-strong: #94a3b8;
+  --border-strong: #64748b; /* 4.8:1 on white: meets the 3:1 non-text contrast for input borders */
   --ink: #0f172a;
   --muted: #475569;
   --on-primary: #ffffff;

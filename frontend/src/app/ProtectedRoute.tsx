@@ -32,6 +32,7 @@ export function ProtectedRoute({ requireMode = false }: ProtectedRouteProps) {
 /** Login/Register/Forgot-password make no sense once signed in. */
 export function PublicOnlyRoute() {
   const { status } = useAuth()
+  const location = useLocation()
   if (status === 'loading') {
     return (
       <div className="flex min-h-screen items-center justify-center bg-canvas">
@@ -39,6 +40,9 @@ export function PublicOnlyRoute() {
       </div>
     )
   }
-  if (status === 'authenticated') return <Navigate to="/portal" replace />
+  const from = (location.state as { from?: unknown } | null)?.from
+  if (status === 'authenticated') {
+    return <Navigate to={typeof from === 'string' && from.startsWith('/') && !from.startsWith('//') ? from : '/portal'} replace />
+  }
   return <Outlet />
 }

@@ -1,6 +1,7 @@
 import { X } from 'lucide-react'
 import { useEffect, useId, useRef, type ReactNode } from 'react'
 import { createPortal } from 'react-dom'
+import { useEscapeLayer } from '../lib/escapeStack'
 
 interface ModalProps {
   open: boolean
@@ -19,10 +20,7 @@ export function Modal({ open, onClose, title, description, children, footer }: M
   const panelRef = useRef<HTMLDivElement>(null)
   const titleId = useId()
   const descId = useId()
-  const onCloseRef = useRef(onClose)
-  useEffect(() => {
-    onCloseRef.current = onClose
-  })
+  useEscapeLayer(open, onClose)
 
   useEffect(() => {
     if (!open) return
@@ -34,11 +32,6 @@ export function Modal({ open, onClose, title, description, children, footer }: M
     document.body.style.overflow = 'hidden'
 
     function onKeyDown(e: KeyboardEvent) {
-      if (e.key === 'Escape') {
-        e.stopPropagation()
-        onCloseRef.current()
-        return
-      }
       if (e.key !== 'Tab' || !panel) return
       const items = Array.from(panel.querySelectorAll<HTMLElement>(FOCUSABLE))
       if (items.length === 0) {

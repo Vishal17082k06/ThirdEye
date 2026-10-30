@@ -1,5 +1,6 @@
 import { useEffect, useId, useRef, useState, type ReactNode } from 'react'
 import { cn } from '../lib/cn'
+import { useEscapeLayer } from '../lib/escapeStack'
 
 interface TriggerProps {
   'aria-expanded': boolean
@@ -23,21 +24,18 @@ export function Popover({ trigger, children, label, align = 'right', className }
   const wrapRef = useRef<HTMLDivElement>(null)
   const panelId = useId()
 
+  useEscapeLayer(open, () => {
+    setOpen(false)
+    wrapRef.current?.querySelector<HTMLElement>('[aria-controls]')?.focus()
+  })
+
   useEffect(() => {
     if (!open) return
-    function onKey(e: KeyboardEvent) {
-      if (e.key === 'Escape') {
-        setOpen(false)
-        wrapRef.current?.querySelector<HTMLElement>('[aria-controls]')?.focus()
-      }
-    }
     function onPointer(e: MouseEvent) {
       if (wrapRef.current && !wrapRef.current.contains(e.target as Node)) setOpen(false)
     }
-    document.addEventListener('keydown', onKey)
     document.addEventListener('mousedown', onPointer)
     return () => {
-      document.removeEventListener('keydown', onKey)
       document.removeEventListener('mousedown', onPointer)
     }
   }, [open])

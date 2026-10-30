@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { api, ApiError, normaliseDetail } from './api'
+import { api, ApiError, normaliseDetail, setUnauthorizedHandler } from './api'
 import { clearToken, setToken } from './token'
 
 function mockFetch(status: number, body: unknown) {
@@ -72,5 +72,24 @@ describe('api', () => {
     const err = await rejection(api.get('/x'))
     expect(err.status).toBe(0)
     expect(err.message).toMatch(/cannot reach/i)
+  })
+
+  it('calls the unauthorized handler on a 401 from a protected endpoint', async () => {
+    const handler = vi.fn()
+    setUnauthorizedHandler(handler)
+    mockFetch(401, { detail: 'Token expired' })
+    await rejection(api.get('/profile'))
+    expect(handler).toHaveBeenCalledTimes(1)
+    setUnauthorizedHandler(null)
+  })
+
+  it('does not call it for login/register failures (wrong password is not an expired session)', async () => {
+    const handler = vi.fn()
+    setUnauthorizedHandler(handler)
+    mockFetch(401, { detail: 'Invalid email or password' })
+    await rejection(api.post('/auth/login', {}))
+    await rejection(api.post('/auth/register', {}))
+    expect(handler).not.toHaveBeenCalled()
+    setUnauthorizedHandler(null)
   })
 })

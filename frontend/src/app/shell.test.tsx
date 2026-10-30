@@ -41,8 +41,7 @@ describe('Sidebar', () => {
     const toggle = screen.getByRole('button', { name: /collapse sidebar/i })
     expect(toggle).toHaveAttribute('aria-expanded', 'true')
     await userEvent.click(toggle)
-    const expand = screen.getByRole('button', { name: /expand sidebar/i })
-    expect(expand).toHaveAttribute('aria-expanded', 'false')
+    expect(screen.getByRole('button', { name: /collapse sidebar/i })).toHaveAttribute('aria-expanded', 'false')
   })
 })
 

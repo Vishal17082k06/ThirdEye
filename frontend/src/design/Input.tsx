@@ -45,7 +45,7 @@ export function Input({ label, hint, error, revealable, type = 'text', id, class
           <button
             type="button"
             onClick={() => setRevealed((r) => !r)}
-            aria-label={revealed ? 'Hide password' : 'Show password'}
+            aria-label="Show password"
             aria-pressed={revealed}
             className="absolute inset-y-0 right-0 flex w-12 items-center justify-center rounded-r-xl text-muted hover:text-ink"
           >

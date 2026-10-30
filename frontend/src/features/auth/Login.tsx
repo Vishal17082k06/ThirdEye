@@ -1,6 +1,6 @@
 import { LogIn } from 'lucide-react'
 import { useRef, useState, type FormEvent } from 'react'
-import { Link, useNavigate } from 'react-router-dom'
+import { Link, useLocation, useNavigate } from 'react-router-dom'
 import { Button, Input } from '../../design'
 import { ApiError } from '../../lib/api'
 import { useAuth } from '../../lib/auth'
@@ -11,6 +11,7 @@ import { stripEmpty, validateEmail } from './validation'
 export function Login() {
   const { login } = useAuth()
   const navigate = useNavigate()
+  const location = useLocation()
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
   const [remember, setRemember] = useState(false)
@@ -34,7 +35,9 @@ export function Login() {
     setSubmitting(true)
     try {
       await login(email.trim(), password, remember)
-      navigate('/portal', { replace: true })
+      // Return to the page that sent the user here (only same-app paths), otherwise pick a portal.
+      const from = (location.state as { from?: unknown } | null)?.from
+      navigate(typeof from === 'string' && from.startsWith('/') && !from.startsWith('//') ? from : '/portal', { replace: true })
     } catch (err) {
       setServerError(err instanceof ApiError ? err.message : 'Something went wrong. Please try again.')
     } finally {

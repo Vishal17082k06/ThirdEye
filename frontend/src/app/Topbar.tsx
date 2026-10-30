@@ -1,4 +1,5 @@
 import { Bell, Menu, ShieldAlert } from 'lucide-react'
+import type { Ref } from 'react'
 import { Link } from 'react-router-dom'
 import { Popover } from '../design'
 import { VoiceButton } from '../features/voice/VoiceButton'
@@ -7,6 +8,7 @@ import { ModeBadge } from './ModeBadge'
 import { UserMenu } from './UserMenu'
 
 interface TopbarProps {
+  menuButtonRef?: Ref<HTMLButtonElement>
   onOpenMobileNav: () => void
   mobileNavOpen: boolean
 }
@@ -45,10 +47,11 @@ function NotificationBell() {
   )
 }
 
-export function Topbar({ onOpenMobileNav, mobileNavOpen }: TopbarProps) {
+export function Topbar({ onOpenMobileNav, mobileNavOpen, menuButtonRef }: TopbarProps) {
   return (
     <header className="sticky top-0 z-20 flex min-h-16 flex-wrap items-center gap-x-2 gap-y-2 border-b-[length:var(--border-w)] border-line bg-surface px-3 py-2 sm:gap-3 sm:px-6">
       <button
+        ref={menuButtonRef}
         type="button"
         onClick={onOpenMobileNav}
         aria-label="Open navigation menu"
@@ -68,11 +71,10 @@ export function Topbar({ onOpenMobileNav, mobileNavOpen }: TopbarProps) {
         <NotificationBell />
         <Link
           to="/sos"
-          aria-label="Emergency SOS"
           className="flex h-[var(--control-h)] items-center gap-2 rounded-xl bg-danger px-3 text-base font-bold text-white hover:brightness-90 sm:px-4"
         >
           <ShieldAlert className="h-5 w-5" aria-hidden="true" />
-          <span className="hidden sm:inline" aria-hidden="true">SOS</span>
+          <span className="sr-only sm:not-sr-only">Emergency SOS</span>
         </Link>
         <UserMenu />
       </div>
