@@ -1,6 +1,7 @@
 import re
 import string
-from typing import Annotated, Any, Literal
+from datetime import datetime, timezone
+from typing import Annotated, Any, Literal, get_args
 
 from pydantic import (
     BaseModel,
@@ -8,6 +9,7 @@ from pydantic import (
     ConfigDict,
     EmailStr,
     Field,
+    PlainSerializer,
     field_validator,
 )
 
@@ -218,3 +220,79 @@ class SettingsDoc(_Section):
 
 class EmailStatus(BaseModel):
     configured: bool
+
+
+# ---------- time ----------
+
+
+def to_utc_iso(value: datetime) -> str:
+    """ISO 8601 UTC with a trailing Z. SQLite hands back naive datetimes (it drops
+    the tzinfo on write), so naive values are treated as UTC before serialising."""
+    if value.tzinfo is None:
+        value = value.replace(tzinfo=timezone.utc)
+    return value.astimezone(timezone.utc).isoformat().replace("+00:00", "Z")
+
+
+UtcDatetime = Annotated[datetime, PlainSerializer(to_utc_iso, return_type=str)]
+
+
+# ---------- events / notifications ----------
+
+EventType = Literal[
+    "obstacle", "ai_analysis", "camera_session", "navigation",
+    "ride", "sos", "device", "distance_reading",
+]  # fmt: skip
+EventSource = Literal["live", "simulation", "hardware"]
+EVENT_TYPES: tuple[str, ...] = get_args(EventType)
+EVENT_SOURCES: tuple[str, ...] = get_args(EventSource)
+
+
+class NotifyIn(BaseModel):
+    kind: Annotated[str, Field(min_length=1, max_length=40)]
+    title: Annotated[str, Field(min_length=1, max_length=200)]
+    body: Annotated[str, Field(max_length=2000)] = ""
+
+
+class EventCreate(BaseModel):
+    type: EventType
+    source: EventSource = "live"
+    title: Annotated[str, Field(min_length=1, max_length=200)]
+    details: dict[str, Any] = {}
+    status: Annotated[str, Field(min_length=1, max_length=30)] = "ok"
+    notify: NotifyIn | None = None
+
+
+class EventOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: int
+    type: str
+    source: str
+    title: str
+    details: dict[str, Any]
+    status: str
+    created_at: UtcDatetime
+
+
+class EventList(BaseModel):
+    items: list[EventOut]
+    total: int
+    limit: int
+    offset: int
+
+
+class NotificationOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: int
+    kind: str
+    title: str
+    body: str
+    source: str
+    read: bool
+    created_at: UtcDatetime
+
+
+class NotificationList(BaseModel):
+    items: list[NotificationOut]
+    unread_count: int
