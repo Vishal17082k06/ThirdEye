@@ -24,6 +24,8 @@ import sys
 import tempfile
 from pathlib import Path
 
+# Pinned for reproducible exports (the versions pip resolved when the model was made).
+PINNED = ["ultralytics==8.4.193", "onnx==1.23.2"]
 MODEL_PATH = Path(__file__).resolve().parents[1] / "models" / "yolov8n.onnx"
 
 _EXPORT_CODE = (
@@ -57,7 +59,7 @@ def export(target: Path = MODEL_PATH) -> Path:
         print("Creating temporary virtualenv and installing ultralytics (this is slow)...")
         _run([sys.executable, "-m", "venv", str(venv)])
         py = str(_venv_python(venv))
-        _run([py, "-m", "pip", "install", "--quiet", "ultralytics", "onnx"])
+        _run([py, "-m", "pip", "install", "--quiet", *PINNED])
         print("Exporting yolov8n.pt -> ONNX (opset 12, imgsz 640)...")
         out = _run([py, "-c", _EXPORT_CODE], cwd=work)
         line = next(x for x in out.splitlines() if x.startswith("EXPORTED:"))
@@ -65,7 +67,11 @@ def export(target: Path = MODEL_PATH) -> Path:
         if not exported.is_absolute():
             exported = work / exported
         target.parent.mkdir(parents=True, exist_ok=True)
-        shutil.copyfile(exported, target)
+        # Copy to a temp name in the target directory, then atomically swap it in, so a
+        # crash mid-copy can never leave a truncated model at the real path.
+        partial = target.with_name(target.name + ".tmp")
+        shutil.copyfile(exported, partial)
+        os.replace(partial, target)
     return target
 
 

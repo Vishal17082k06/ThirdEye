@@ -48,8 +48,8 @@ def detect(
     except det.ImageTooLargeError as exc:
         raise HTTPException(status.HTTP_413_CONTENT_TOO_LARGE, str(exc)) from None
     except det.InvalidImageError as exc:
-        raise HTTPException(status.HTTP_415_UNSUPPORTED_MEDIA_TYPE, str(exc)) from None
-    except det.ModelNotFoundError as exc:
+        raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, str(exc)) from None
+    except (det.ModelNotFoundError, det.ModelLoadError) as exc:
         raise HTTPException(status.HTTP_503_SERVICE_UNAVAILABLE, str(exc)) from None
 
     detections = result.detections

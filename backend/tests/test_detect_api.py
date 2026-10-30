@@ -117,7 +117,43 @@ def test_non_image_rejected(client, auth):
         r = post(client, auth[0], content=b"not an image", name="a.txt", ctype="text/plain")
     finally:
         app.dependency_overrides.pop(d.get_detector, None)
-    assert r.status_code == 415
+    assert r.status_code == 422 and r.json()["detail"] == "Could not read image"
+
+
+def test_pixel_bomb_413(client, auth):
+    app.dependency_overrides[d.get_detector] = lambda: Detector("missing.onnx")
+    buf = io.BytesIO()
+    Image.new("L", (6000, 5000)).save(buf, "PNG")
+    try:
+        r = post(client, auth[0], content=buf.getvalue())
+    finally:
+        app.dependency_overrides.pop(d.get_detector, None)
+    assert r.status_code == 413
+
+
+def test_truncated_image_422_not_500(client, auth):
+    import numpy as np
+
+    buf = io.BytesIO()
+    rng = np.random.default_rng(2)
+    Image.fromarray(rng.integers(0, 255, (200, 200, 3), dtype=np.uint8)).save(buf, "JPEG")
+    app.dependency_overrides[d.get_detector] = lambda: Detector("missing.onnx")
+    try:
+        r = post(client, auth[0], content=buf.getvalue()[:2000], ctype="image/jpeg")
+    finally:
+        app.dependency_overrides.pop(d.get_detector, None)
+    assert r.status_code == 422
+
+
+def test_corrupt_model_503(client, auth, tmp_path):
+    bad = tmp_path / "bad.onnx"
+    bad.write_bytes(b"nope")
+    app.dependency_overrides[d.get_detector] = lambda: Detector(bad)
+    try:
+        r = post(client, auth[0])
+    finally:
+        app.dependency_overrides.pop(d.get_detector, None)
+    assert r.status_code == 503 and "could not be loaded" in r.json()["detail"]
 
 
 def test_oversized_413(client, auth):
@@ -181,6 +217,7 @@ def test_record_low_or_empty_is_ai_analysis(client, auth, fake):
     post(client, auth[0], {"record": "true"})
     events, notes = events_and_notes(client)
     assert [e.type for e in events] == ["ai_analysis", "ai_analysis"] and notes == []
+    assert events[0].title == "Objects detected in view, none close."
     assert events[1].title == "Path appears clear in the current camera view."
     assert events[1].details["top_label"] is None
 

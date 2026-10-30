@@ -10,7 +10,9 @@ Pipeline
    the boxes back to the original image and normalise to 0..1.
 4. ``position_of`` / ``classify_risk`` / ``announcement`` / ``summarise``.
 
-Position (box centre x, normalised): left < 0.33 <= ahead <= 0.67 < right.
+Position: a box is ``ahead`` when its centre is in the central band x 0.33-0.67 OR it
+covers more than 25% of that band (a big object spilling over from the side still
+blocks the path); otherwise ``left`` / ``right`` by its centre.
 
 Risk table (``area`` = normalised box width * height, i.e. fraction of the frame;
 a bigger box means the object is closer). Thresholds are inclusive lower bounds and
@@ -21,12 +23,21 @@ are the named constants in ``RISK_THRESHOLDS``. Objects NOT ahead are demoted on
     vehicle  car bus truck motorcycle bicycle train    0.03    0.10   0.25
     person   person                                    0.02    0.08   0.20
     animal   dog cat horse cow sheep bird ...          0.05    0.15   never
-    static   bench chair fire hydrant stop sign ...    0.05    0.20   never
-    other    everything else                           0.30    never  never
+    static   bench chair couch potted plant hydrant..  0.05    0.30   never
+    other    everything else (signs, lights, cups...)  0.30    0.50   never
 
-Below the ``medium`` threshold the risk is ``low``. Only vehicles and people can be
-``critical``. Risk is a heuristic from a single camera frame: it is NOT a distance
-measurement, and an empty result never means the area is safe.
+Below ``medium`` the risk is ``low``. Only vehicles and people can be ``critical``.
+Static and other objects are capped at ``medium`` unless they are ahead AND very large
+(the ``high`` column); off-axis they are demoted from there. Risk is a heuristic from a
+single camera frame: it is NOT a distance measurement.
+
+Announcements are stateless, so the backend never claims a vehicle is "approaching"
+(that needs consecutive frames; the frontend derives it from a growing box). A
+vehicle ahead at high/critical risk is "Vehicle ahead."; off-axis it is
+"Vehicle on your left/right."; other objects are "<Label> detected ahead|on your left.".
+The frame summary speaks only detections of risk >= medium; if there are detections
+but none that close it says "Objects detected in view, none close."; only a frame with
+zero detections says "Path appears clear in the current camera view." (never "safe").
 
 Optional OpenAI Vision: NOT implemented. The ``ai.openaiVisionEnabled`` setting is a
 documented no-op; the YOLO result is always the primary (and only) engine.
@@ -37,6 +48,7 @@ from __future__ import annotations
 import io
 import threading
 import time
+import warnings
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -48,6 +60,8 @@ MODEL_PATH = Path(__file__).resolve().parents[2] / "models" / "yolov8n.onnx"
 MODEL_NAME = "yolov8n-onnx"
 INPUT_SIZE = 640
 MAX_IMAGE_BYTES = 10 * 1024 * 1024
+MAX_PIXELS = 25_000_000  # decompression-bomb guard, checked before decoding
+LOAD_FAILURE_TTL_S = 30.0
 MAX_DETECTIONS = 100
 IOU_THRESHOLD = 0.45
 PAD_VALUE = 114
@@ -55,6 +69,7 @@ PAD_VALUE = 114
 # Position boundaries on the normalised centre x.
 LEFT_MAX = 0.33  # centre x < LEFT_MAX -> left
 RIGHT_MIN = 0.67  # centre x > RIGHT_MIN -> right
+BAND_OVERLAP_MIN = 0.25  # fraction of the central band a box must cover to count as ahead
 
 RISK_LEVELS = ("low", "medium", "high", "critical")
 
@@ -63,8 +78,8 @@ RISK_THRESHOLDS: dict[str, tuple[float, float | None, float | None]] = {
     "vehicle": (0.03, 0.10, 0.25),
     "person": (0.02, 0.08, 0.20),
     "animal": (0.05, 0.15, None),
-    "static": (0.05, 0.20, None),
-    "other": (0.30, None, None),
+    "static": (0.05, 0.30, None),
+    "other": (0.30, 0.50, None),
 }
 
 COCO_CLASSES: tuple[str, ...] = (
@@ -88,11 +103,14 @@ ANIMALS = frozenset(
 STATIC_OBSTACLES = frozenset(
     {
         "bench", "chair", "couch", "potted plant", "dining table", "fire hydrant",
-        "stop sign", "parking meter", "traffic light", "suitcase", "bed",
+        "suitcase", "bed",
     }
 )
 
 CLEAR_TEXT = "Path appears clear in the current camera view."
+NONE_CLOSE_TEXT = "Objects detected in view, none close."
+LOAD_ERROR_TEXT = "Detection model could not be loaded. Re-run backend/scripts/export_model.py"
+SPOKEN_MIN_RISK = "medium"
 
 
 class DetectorError(Exception):
@@ -101,6 +119,10 @@ class DetectorError(Exception):
 
 class ModelNotFoundError(DetectorError):
     pass
+
+
+class ModelLoadError(DetectorError):
+    """The model file exists but ONNX Runtime could not load it."""
 
 
 class InvalidImageError(DetectorError):
@@ -191,12 +213,14 @@ def nms(
     return keep
 
 
-def position_of(center_x: float) -> str:
-    if center_x < LEFT_MAX:
-        return "left"
-    if center_x > RIGHT_MIN:
-        return "right"
-    return "ahead"
+def position_of(center_x: float, width: float = 0.0) -> str:
+    """left / ahead / right from the normalised box centre and width."""
+    if LEFT_MAX <= center_x <= RIGHT_MIN:
+        return "ahead"
+    overlap = min(center_x + width / 2, RIGHT_MIN) - max(center_x - width / 2, LEFT_MAX)
+    if overlap > BAND_OVERLAP_MIN * (RIGHT_MIN - LEFT_MAX):
+        return "ahead"
+    return "left" if center_x < LEFT_MAX else "right"
 
 
 def risk_group(label: str) -> str:
@@ -227,12 +251,11 @@ def classify_risk(label: str, area: float, position: str) -> str:
 
 
 def announcement(detection: Detection) -> str:
-    if (
-        detection.label in VEHICLES
-        and detection.position == "ahead"
-        and detection.risk in ("high", "critical")
-    ):
-        return "Vehicle approaching."
+    if detection.label in VEHICLES:
+        if detection.position != "ahead":
+            return f"Vehicle on your {detection.position}."
+        if detection.risk in ("high", "critical"):
+            return "Vehicle ahead."
     name = detection.label[:1].upper() + detection.label[1:]
     where = "ahead" if detection.position == "ahead" else f"on your {detection.position}"
     return f"{name} detected {where}."
@@ -240,7 +263,7 @@ def announcement(detection: Detection) -> str:
 
 def make_detection(label: str, confidence: float, box: dict[str, float]) -> Detection:
     """Build a Detection, deriving position, risk and announcement from the box."""
-    position = position_of(box["x"] + box["w"] / 2)
+    position = position_of(box["x"] + box["w"] / 2, box["w"])
     risk = classify_risk(label, box["w"] * box["h"], position)
     partial = Detection(label, confidence, box, position, risk, "")
     return Detection(label, confidence, box, position, risk, announcement(partial))
@@ -264,7 +287,11 @@ def highest_risk(detections: list[Detection]) -> str | None:
 def summarise(detections: list[Detection]) -> str:
     """One announcement for the whole frame, driven by the highest-risk detection."""
     top = top_detection(detections)
-    return CLEAR_TEXT if top is None else top.announcement
+    if top is None:
+        return CLEAR_TEXT
+    if RISK_LEVELS.index(top.risk) < RISK_LEVELS.index(SPOKEN_MIN_RISK):
+        return NONE_CLOSE_TEXT
+    return top.announcement
 
 
 def decode(
@@ -306,14 +333,23 @@ def decode(
 
 
 def _open_image(image_bytes: bytes) -> Image.Image:
+    """Decode to an upright RGB image, mapping every failure to a DetectorError."""
     if len(image_bytes) > MAX_IMAGE_BYTES:
         raise ImageTooLargeError("Image is larger than the 10 MB limit")
     try:
-        img = Image.open(io.BytesIO(image_bytes))
-        img.load()
-    except (UnidentifiedImageError, OSError, Image.DecompressionBombError, ValueError):
-        raise InvalidImageError("File is not a valid image") from None
-    return ImageOps.exif_transpose(img).convert("RGB")
+        with warnings.catch_warnings():
+            warnings.simplefilter("error", Image.DecompressionBombWarning)
+            img = Image.open(io.BytesIO(image_bytes))
+            if img.width * img.height > MAX_PIXELS:  # header only: nothing decoded yet
+                raise ImageTooLargeError("Image has too many pixels (limit 25 megapixels)")
+            img.load()
+            return ImageOps.exif_transpose(img).convert("RGB")
+    except ImageTooLargeError:
+        raise
+    except (Image.DecompressionBombError, Image.DecompressionBombWarning):
+        raise ImageTooLargeError("Image has too many pixels (limit 25 megapixels)") from None
+    except (UnidentifiedImageError, OSError, SyntaxError, ValueError):
+        raise InvalidImageError("Could not read image") from None
 
 
 class Detector:
@@ -323,7 +359,14 @@ class Detector:
         self.model_path = Path(model_path)
         self._session: Any = None
         self._input_name = ""
+        self._failed_at: float | None = None
         self._lock = threading.Lock()
+
+    def _load_failed_recently(self) -> bool:
+        return (
+            self._failed_at is not None
+            and time.monotonic() - self._failed_at < LOAD_FAILURE_TTL_S
+        )
 
     def _get_session(self) -> Any:
         if self._session is None:
@@ -333,12 +376,19 @@ class Detector:
                         raise ModelNotFoundError(
                             "Detection model not found. Run backend/scripts/export_model.py"
                         )
-                    import onnxruntime as ort
+                    if self._load_failed_recently():
+                        raise ModelLoadError(LOAD_ERROR_TEXT)
+                    try:
+                        import onnxruntime as ort
 
-                    session = ort.InferenceSession(
-                        str(self.model_path), providers=["CPUExecutionProvider"]
-                    )
-                    self._input_name = session.get_inputs()[0].name
+                        session = ort.InferenceSession(
+                            str(self.model_path), providers=["CPUExecutionProvider"]
+                        )
+                        self._input_name = session.get_inputs()[0].name
+                    except Exception:  # corrupt/incompatible model: do not retry per request
+                        self._failed_at = time.monotonic()
+                        raise ModelLoadError(LOAD_ERROR_TEXT) from None
+                    self._failed_at = None
                     self._session = session
         return self._session
 
