@@ -53,13 +53,22 @@ function ClickHandler({ onSelect }: { onSelect?: (lat: number, lon: number) => v
   return null
 }
 
-/** Keeps the whole route in view when a new one arrives, unless the map is following the person. */
+/**
+ * Fits the map to a route when a NEW route arrives, and only then: not when following starts or stops, not after a
+ * drag, not when a trip ends. A route that arrives while the map is following the person is not fitted (and is not
+ * fitted later either).
+ */
 function FitRoute({ route, suppress }: { route?: LatLngTuple[]; suppress: boolean }) {
   const map = useMap()
+  const seen = useRef<LatLngTuple[] | undefined>(undefined)
+  const suppressRef = useRef(suppress)
+  suppressRef.current = suppress
   useEffect(() => {
-    if (suppress || !route || route.length < 2) return
+    if (route === seen.current) return
+    seen.current = route
+    if (suppressRef.current || !route || route.length < 2) return
     map.fitBounds(L.latLngBounds(route), { padding: [40, 40], maxZoom: 17 })
-  }, [route, map, suppress])
+  }, [route, map])
   return null
 }
 

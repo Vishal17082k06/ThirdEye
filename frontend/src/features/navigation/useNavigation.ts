@@ -37,6 +37,8 @@ export const navTiming = {
   checkMs: 5_000,
   /** "signal lost" is only spoken if the person was moving in this window */
   movedRecentMs: 30_000,
+  /** a trip that has not begun (no first fix or route) after this long is given up on */
+  startMs: 20_000,
 }
 const MOVED_THRESHOLD_M = 15
 
@@ -127,11 +129,12 @@ export function useNavigationEngine() {
   const [arrived, setArrived] = useState(false)
   const [tripActive, setTripActive] = useState(false)
   const [stale, setStale] = useState(false)
+  const [startFailure, setStartFailure] = useState<string | null>(null)
 
   /* ---------- where the person is ---------- */
   const gpsUsable = !simulation && geo.status !== 'idle' && !!geo.position && geo.inArea === true
-  const hardLost = navigating && !simulation && (geo.status === 'unavailable' || geo.status === 'denied')
-  const gpsLost = navigating && !simulation && (stale || hardLost)
+  const hardLost = tripActive && !simulation && (geo.status === 'unavailable' || geo.status === 'denied')
+  const gpsLost = tripActive && !simulation && (stale || hardLost)
   const navPos: Pos | null = simulation ? (simulating ? simPos : null) : gpsUsable && geo.position ? geo.position : null
   const origin: LatLon | null = start.place ?? (gpsUsable && geo.position ? geo.position : null)
   const lowAccuracy = navigating && (navPos?.accuracy ?? 0) > MAX_USABLE_ACCURACY_M
@@ -223,6 +226,52 @@ export function useNavigationEngine() {
     })
     // only the trip key (destination or mode) should trigger this
   }, [destination, routeMode])
+
+  /* ---------- a trip that was asked for but has not begun ---------- */
+  // Started from another page (the voice assistant) the trip waits for a start point and a route. Say what it waits for.
+  const startPending = useMemo((): { kind: 'waiting' | 'denied' | 'unavailable' | 'outside' | 'no-start' | 'route-error' | 'route'; message: string } | null => {
+    if (!navigating || tripActive) return null
+    if (!origin) {
+      if (simulation) return { kind: 'no-start', message: 'Simulation mode: open Navigation and choose a starting point.' }
+      if (geo.status === 'denied') return { kind: 'denied', message: 'Location permission denied — open Navigation to choose a start point manually.' }
+      if (geo.status === 'unavailable') return { kind: 'unavailable', message: 'GPS not available — open Navigation to choose a start point manually.' }
+      if (geo.position && geo.inArea === false) {
+        return { kind: 'outside', message: 'Your GPS position is outside the Coimbatore service area — open Navigation to choose a start point manually.' }
+      }
+      return { kind: 'waiting', message: 'Waiting for GPS…' }
+    }
+    if (routeState.status === 'error') return { kind: 'route-error', message: routeState.error ?? 'No route is available.' }
+    return { kind: 'route', message: 'Finding a route…' }
+  }, [navigating, tripActive, origin, simulation, geo.status, geo.position, geo.inArea, routeState.status, routeState.error])
+  const pendingMessage = useRef<string | null>(null)
+  pendingMessage.current = startPending?.message ?? null
+
+  // Bounded wait: no trip within navTiming.startMs gives up, ends the request (which also stops the GPS watch the
+  // request switched on), and says why. It is logged, so history shows an attempt that never began.
+  const waitingToStart = navigating && !tripActive
+  useEffect(() => {
+    if (!waitingToStart) return
+    const id = window.setTimeout(() => {
+      if (session.current.started) return
+      const reason = pendingMessage.current ?? 'The trip could not start in time.'
+      const failure = `Navigation could not start: ${reason.replace(/[.…]+$/, '')}.`
+      navigationController.stop()
+      setStartFailure(failure)
+      void postEvent({
+        type: 'navigation',
+        source: latest.current.source,
+        title: failure.slice(0, 200),
+        status: 'failed',
+        details: { reason, destination: latest.current.destination ? { label: latest.current.destination.label } : null, mode: latest.current.routeMode },
+      })
+    }, navTiming.startMs)
+    return () => window.clearTimeout(id)
+  }, [waitingToStart])
+  // A new request clears the previous failure.
+  useEffect(() => {
+    if (navigating) setStartFailure(null)
+  }, [navigating])
+  const dismissStartFailure = useCallback(() => setStartFailure(null), [])
 
   /* ---------- trip lifecycle ---------- */
   /** Ends the trip: logs the stop, and stops speech unless the trip ended by arrival (let "You have arrived." finish). */
@@ -431,8 +480,11 @@ export function useNavigationEngine() {
     })
   }, [simulation])
 
-  const startNavigation = useCallback(() => ctrl.start(), [ctrl])
-  const stopNavigation = useCallback(() => ctrl.stop(), [ctrl])
+  const startNavigation = useCallback(() => navigationController.start(), [])
+  const stopNavigation = useCallback(() => navigationController.stop(), [])
+  const setRouteMode = navigationController.setMode
+  const { choose: chooseStart } = start
+  const chooseSimulatedStart = useCallback(() => chooseStart(SIMULATED_START), [chooseStart])
 
   return {
     simulation,
@@ -447,7 +499,10 @@ export function useNavigationEngine() {
     dest,
     destination,
     routeMode,
-    setMode: ctrl.setMode,
+    setMode: setRouteMode,
+    startPending,
+    startFailure,
+    dismissStartFailure,
     navigating,
     tripActive,
     routeState,
@@ -463,7 +518,7 @@ export function useNavigationEngine() {
     stopNavigation,
     voiceEnabled,
     registerPage,
-    chooseSimulatedStart: () => start.choose(SIMULATED_START),
+    chooseSimulatedStart,
   }
 }
 

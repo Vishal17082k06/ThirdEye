@@ -127,6 +127,37 @@ describe('MapView', () => {
       expect(m.map.fitBounds).not.toHaveBeenCalled()
     })
 
+    it('fits only when the route changes: never after a drag, a resume, or the end of a trip', async () => {
+      const user = userEvent.setup()
+      const routeA = route
+      const routeB: Array<[number, number]> = [
+        [11.0, 76.96],
+        [11.02, 76.97],
+      ]
+      const { rerender } = render(<MapView area={FALLBACK_AREA} route={routeA} current={at(11.0)} />)
+      expect(m.map.fitBounds).toHaveBeenCalledTimes(1)
+      rerender(<MapView area={FALLBACK_AREA} route={routeA} current={at(11.0)} follow />) // trip starts: no refit
+      act(() => m.handlers.dragstart?.())
+      expect(m.map.fitBounds).toHaveBeenCalledTimes(1) // dragging never re-fits
+      await user.click(screen.getByRole('button', { name: 'Re-centre' }))
+      expect(m.map.fitBounds).toHaveBeenCalledTimes(1)
+      rerender(<MapView area={FALLBACK_AREA} route={routeA} current={at(11.0)} />) // trip ends: no refit
+      expect(m.map.fitBounds).toHaveBeenCalledTimes(1)
+      rerender(<MapView area={FALLBACK_AREA} route={routeB} current={at(11.0)} />) // a new route does
+      expect(m.map.fitBounds).toHaveBeenCalledTimes(2)
+    })
+
+    it('a route that arrives while following is not fitted, now or when following stops', () => {
+      const routeB: Array<[number, number]> = [
+        [11.0, 76.96],
+        [11.02, 76.97],
+      ]
+      const { rerender } = render(<MapView area={FALLBACK_AREA} route={route} current={at(11.0)} follow />)
+      rerender(<MapView area={FALLBACK_AREA} route={routeB} current={at(11.0)} follow />)
+      rerender(<MapView area={FALLBACK_AREA} route={routeB} current={at(11.0)} />)
+      expect(m.map.fitBounds).not.toHaveBeenCalled()
+    })
+
     it('a manual drag pauses following and shows Re-centre, which resumes it', async () => {
       const user = userEvent.setup()
       const { rerender } = render(<MapView area={FALLBACK_AREA} route={route} current={at(11.0)} follow />)

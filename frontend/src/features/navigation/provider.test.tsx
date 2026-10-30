@@ -270,3 +270,96 @@ describe('Navigation: GPS signal lost (no fix for a while)', () => {
     expect(screen.queryByText(/GPS signal lost\. Navigation is paused/)).not.toBeInTheDocument()
   })
 })
+
+describe('A trip asked for from another page that has not begun', () => {
+  const original = { ...navTiming }
+  afterEach(() => Object.assign(navTiming, original))
+
+  function ask() {
+    const ctx = setup({ route: '/rides' })
+    act(() => {
+      navigationController.setDestination({ ...RACE_COURSE, label: 'Race Course' })
+      navigationController.start()
+    })
+    return ctx
+  }
+  const bar = () => screen.getByRole('region', { name: 'Navigation in progress' })
+
+  it('shows "Waiting for GPS…" with Open and Stop while the first fix is pending, and Stop cancels the request', async () => {
+    const user = userEvent.setup()
+    ask()
+    await waitFor(() => expect(geo.watchPosition).toHaveBeenCalledTimes(1))
+    expect(bar()).toHaveTextContent('has not started — Waiting for GPS…')
+    expect(within(bar()).getByRole('link', { name: 'Open' })).toHaveAttribute('href', '/navigation')
+    await user.click(within(bar()).getByRole('button', { name: 'Stop' }))
+    expect(screen.queryByRole('region', { name: 'Navigation in progress' })).not.toBeInTheDocument()
+    expect(navigationController.getState().navigating).toBe(false)
+    expect(geo.clearWatch).toHaveBeenCalled() // the watch the request switched on is switched off again
+    expect(spoken('GPS signal lost.')).toBe(0)
+  })
+
+  it('says why when location permission is denied, and never announces "GPS signal lost"', async () => {
+    ask()
+    await waitFor(() => expect(geo.watchPosition).toHaveBeenCalled())
+    act(() => geo.fail(1))
+    await waitFor(() => expect(bar()).toHaveTextContent('Location permission denied — open Navigation to choose a start point manually'))
+    expect(within(bar()).getByRole('button', { name: 'Stop' })).toBeInTheDocument()
+    expect(speech.speak).not.toHaveBeenCalledWith('GPS signal lost.', expect.anything())
+  })
+
+  it('says why when GPS is unavailable', async () => {
+    ask()
+    await waitFor(() => expect(geo.watchPosition).toHaveBeenCalled())
+    act(() => geo.fail(2))
+    await waitFor(() => expect(bar()).toHaveTextContent('GPS not available — open Navigation to choose a start point manually'))
+    expect(speech.speak).not.toHaveBeenCalledWith('GPS signal lost.', expect.anything())
+  })
+
+  it('gives up after the bounded wait: stops the watch, ends the request, logs it and says so', async () => {
+    const user = userEvent.setup()
+    navTiming.startMs = 250
+    const { api } = ask()
+    await waitFor(() => expect(geo.watchPosition).toHaveBeenCalled())
+    const text = await screen.findByText('Navigation could not start: Waiting for GPS.')
+    const failure = text.closest('[role="alert"]') as HTMLElement
+    expect(navigationController.getState().navigating).toBe(false)
+    expect(geo.clearWatch).toHaveBeenCalled()
+    expect(events(api)).toHaveLength(1)
+    expect(events(api)[0]).toMatchObject({ type: 'navigation', status: 'failed', source: 'live' })
+    expect(within(failure).getByRole('link', { name: 'Open' })).toBeInTheDocument()
+    await user.click(within(failure).getByRole('button', { name: 'Dismiss' }))
+    expect(screen.queryByText(/Navigation could not start/)).not.toBeInTheDocument()
+  })
+
+  it('a first fix before the wait runs out starts the trip normally and no failure follows', async () => {
+    navTiming.startMs = 700
+    const { api } = ask()
+    await waitFor(() => expect(geo.watchPosition).toHaveBeenCalled())
+    await settle(100)
+    act(() => geo.emit(GANDHIPURAM.lat, GANDHIPURAM.lon))
+    await waitFor(() => expect(bar()).toHaveTextContent('Navigation in progress — Race Course'))
+    await waitFor(() => expect(speech.speak).toHaveBeenCalledWith('Head south on Avinashi Road', { interrupt: true }))
+    await settle(900)
+    expect(screen.queryByText(/Navigation could not start/)).not.toBeInTheDocument()
+    expect(events(api).map((e) => e.status)).toEqual(['started'])
+    expect(navigationController.getState().navigating).toBe(true)
+  })
+})
+
+describe('Provider unmount (logout) while the server is unreachable', () => {
+  it('fails harmlessly: no unhandled rejection from the stop event', async () => {
+    const unhandled = vi.fn()
+    const process = (globalThis as unknown as { process: { on(e: string, f: () => void): void; off(e: string, f: () => void): void } }).process
+    process.on('unhandledRejection', unhandled)
+    try {
+      const { unmount } = await startTrip()
+      vi.stubGlobal('fetch', vi.fn(async () => Promise.reject(new TypeError('network down'))))
+      unmount()
+      await new Promise((r) => setTimeout(r, 100))
+      expect(unhandled).not.toHaveBeenCalled()
+      expect(navigationController.getState().navigating).toBe(false)
+    } finally {
+      process.off('unhandledRejection', unhandled)
+    }
+  })
+})

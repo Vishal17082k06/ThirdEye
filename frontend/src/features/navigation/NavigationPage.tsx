@@ -295,6 +295,7 @@ export function NavigationPage() {
             />
             <ModeToggle value={nav.routeMode} onChange={nav.setMode} />
 
+            {nav.startFailure && <ErrorBanner message={nav.startFailure} />}
             {routeState.status === 'loading' && (
               <p className="flex items-center gap-2 text-base text-muted">
                 <Spinner size="sm" label="Finding a route" /> Finding a route…

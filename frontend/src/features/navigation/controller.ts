@@ -7,8 +7,9 @@ import type { Place, RouteMode } from '../maps/api'
  * the controller's intent; anything else - notably the later voice assistant ("Take me to ...", "Walking mode") -
  * steers navigation by calling the same four functions: setDestination, setMode, start and stop.
  *
- * `navigating` is an intent: it becomes an active trip once the page has a route. The page stops navigation when it
- * is left, because GPS and speech only run while it is open.
+ * `navigating` is an intent: it becomes an active trip once there is a start point and a route. The provider lives in
+ * the Shell, so a trip keeps running across pages; it ends on stop(), arrival, logout, a Live/Simulation switch, or
+ * after a bounded wait if it never got a first GPS fix.
  */
 export interface PublishedPosition {
   lat: number
