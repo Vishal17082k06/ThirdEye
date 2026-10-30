@@ -308,4 +308,23 @@ describe('AI Assistance page', () => {
     await waitFor(() => expect(screen.getByTestId('live-assertive').textContent).not.toBe(first))
     expect(within(screen.getByRole('list', { name: 'Detection history' })).getAllByRole('listitem')).toHaveLength(2)
   })
+
+  it('repeats a critical hazard that stays in view by voice but does not append duplicate history', async () => {
+    const critical = result([det('person', 'critical')], 'Person detected ahead.', 'critical')
+    const { detect } = setup(() => critical)
+    const real = Date.now
+    let offset = 0
+    vi.spyOn(Date, 'now').mockImplementation(() => real() + offset)
+    try {
+      renderApp(<AiAssistance />, { mode: 'live' })
+      await startDetection()
+      await waitFor(() => expect(speak).toHaveBeenCalledTimes(1))
+      offset = 11_000
+      await waitFor(() => expect(detect.length).toBeGreaterThanOrEqual(2), { timeout: 4000 })
+      await waitFor(() => expect(speak).toHaveBeenCalledTimes(2))
+      expect(within(screen.getByRole('list', { name: 'Detection history' })).getAllByRole('listitem')).toHaveLength(1)
+    } finally {
+      vi.restoreAllMocks()
+    }
+  })
 })

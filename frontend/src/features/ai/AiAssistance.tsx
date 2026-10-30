@@ -84,9 +84,11 @@ export function AiAssistance() {
         recent.current = [...recent.current, result.detections].slice(-3)
       }
       setCurrent({ result, origin, text })
-      const isNew = announce(text, risk)
-      if (isNew || manual) {
-        setSpoken((s) => ({ text, assertive: risk === 'high' || risk === 'critical', n: s.n + 1 }))
+      const announced = announce(text, risk)
+      // Live region and speech update on new announcements and on repeats of a hazard still in view.
+      if (announced || manual) setSpoken((s) => ({ text, assertive: risk === 'high' || risk === 'critical', n: s.n + 1 }))
+      // History only records something new, never the repeats.
+      if (announced === 'new' || manual) {
         setHistory((h) =>
           [{ id: nextId.current++, at: Date.now(), text, risk, origin, source }, ...h].slice(0, HISTORY_LIMIT),
         )

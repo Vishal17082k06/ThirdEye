@@ -153,6 +153,8 @@ function SpeechHarness({ now }: { now: { t: number } }) {
       <button onClick={() => (document.title = String(s.announce('Person detected ahead.', 'medium', now.t)))}>a-medium</button>
       <button onClick={() => (document.title = String(s.announce('Person detected ahead.', 'critical', now.t)))}>a-critical</button>
       <button onClick={() => (document.title = String(s.announce('Vehicle ahead.', 'medium', now.t)))}>a-other</button>
+      <button onClick={() => (document.title = String(s.announce('Person detected ahead.', 'high', now.t)))}>a-high</button>
+      <button onClick={() => (document.title = String(s.announce('Person detected ahead.', 'low', now.t)))}>a-low</button>
     </div>
   )
 }
@@ -173,23 +175,81 @@ describe('useSpeech', () => {
     await waitFor(() => expect(screen.getByText('a-medium')).toBeEnabled())
     await new Promise((r) => setTimeout(r, 30)) // let settings load
     await userEvent.click(screen.getByText('a-medium'))
-    expect(document.title).toBe('true')
+    expect(document.title).toBe('new')
     now.t += 2000
     await userEvent.click(screen.getByText('a-medium'))
     expect(document.title).toBe('false')
     await userEvent.click(screen.getByText('a-critical'))
-    expect(document.title).toBe('true')
+    expect(document.title).toBe('new')
     expect(synth.cancel).toHaveBeenCalled() // critical interrupts
-    // unchanged after 7 s: still suppressed (an unchanged scene is not re-announced)
-    now.t += 7000
-    await userEvent.click(screen.getByText('a-critical'))
-    expect(document.title).toBe('false')
-    // text changed: announced; going back after the window announces again
+    // a text change is announced as new
     await userEvent.click(screen.getByText('a-other'))
-    expect(document.title).toBe('true')
+    expect(document.title).toBe('new')
+  })
+
+  async function setupRepeat(speaking = false) {
+    const synth = stubSpeech(speaking)
+    routes()
+    const now = { t: 1_000_000 }
+    renderApp(<SpeechHarness now={now} />)
+    await new Promise((r) => setTimeout(r, 30))
+    return { synth, now }
+  }
+  const press = async (name: string) => {
+    await userEvent.click(screen.getByText(name))
+    return document.title
+  }
+
+  it('a critical hazard that stays in view is suppressed at 7 s and announced again after 10 s', async () => {
+    const { synth, now } = await setupRepeat()
+    expect(await press('a-critical')).toBe('new')
     now.t += 7000
-    await userEvent.click(screen.getByText('a-critical'))
-    expect(document.title).toBe('true')
+    expect(await press('a-critical')).toBe('false')
+    now.t += 3000
+    expect(await press('a-critical')).toBe('repeat')
+    expect(synth.speak).toHaveBeenCalledTimes(2)
+    // the timer restarts from the repeat
+    now.t += 9000
+    expect(await press('a-critical')).toBe('false')
+    now.t += 1000
+    expect(await press('a-critical')).toBe('repeat')
+  })
+
+  it('a high hazard repeats after 15 s, not before', async () => {
+    const { now } = await setupRepeat()
+    expect(await press('a-high')).toBe('new')
+    now.t += 14_000
+    expect(await press('a-high')).toBe('false')
+    now.t += 1000
+    expect(await press('a-high')).toBe('repeat')
+  })
+
+  it('low and medium risk are never repeated within 60 s, then refreshed', async () => {
+    const { now } = await setupRepeat()
+    expect(await press('a-medium')).toBe('new')
+    now.t += 59_000
+    expect(await press('a-medium')).toBe('false')
+    now.t += 1000
+    expect(await press('a-medium')).toBe('repeat')
+    expect(await press('a-low')).toBe('false') // lower risk of the same text is still unchanged
+    now.t += 30_000
+    expect(await press('a-low')).toBe('false')
+  })
+
+  it('a repeat never interrupts or queues behind other speech, and is retried once the speaker is free', async () => {
+    const { synth, now } = await setupRepeat()
+    expect(await press('a-critical')).toBe('new')
+    synth.cancel.mockClear()
+    synth.speak.mockClear()
+    synth.speaking = true
+    now.t += 11_000
+    expect(await press('a-critical')).toBe('false') // busy: nothing cancelled, nothing queued
+    expect(synth.cancel).not.toHaveBeenCalled()
+    expect(synth.speak).not.toHaveBeenCalled()
+    synth.speaking = false
+    now.t += 500
+    expect(await press('a-critical')).toBe('repeat') // not starved: tries again right away
+    expect(synth.speak).toHaveBeenCalledTimes(1)
   })
 
   it('does not queue lower-risk speech behind speech already playing, and respects the feedback setting', async () => {
@@ -206,7 +266,7 @@ describe('useSpeech', () => {
     renderApp(<SpeechHarness now={{ t: 9_000_000 }} />)
     await new Promise((r) => setTimeout(r, 30))
     await userEvent.click(screen.getAllByText('a-critical')[1])
-    expect(document.title).toBe('true') // announced for the live region ...
+    expect(document.title).toBe('new') // announced for the live region ...
     expect(off.speak).not.toHaveBeenCalled() // ... but not spoken
   })
 })

@@ -4,6 +4,14 @@ import { useSettings } from '../lib/settings'
 export type Risk = 'low' | 'medium' | 'high' | 'critical'
 export const RISK_RANK: Record<Risk, number> = { low: 0, medium: 1, high: 2, critical: 3 }
 
+/** A hazard that stays in view is repeated: critical every 10 s, high every 15 s. Lower risks refresh after 60 s. */
+export const REPEAT_CRITICAL_MS = 10_000
+export const REPEAT_HIGH_MS = 15_000
+export const REFRESH_MS = 60_000
+
+/** 'new' = text changed or risk escalated; 'repeat' = same hazard still in view; false = suppressed. */
+export type Announced = 'new' | 'repeat' | false
+
 /** The same announcement is not repeated inside this window unless its risk has escalated. */
 export const DEDUPE_MS = 6000
 
@@ -43,7 +51,7 @@ export function useSpeech() {
   voiceRef.current = settings
   const owner = useRef(Symbol('speech'))
   const recent = useRef(new Map<string, { at: number; rank: number }>())
-  const lastOverall = useRef<{ text: string; rank: number } | null>(null)
+  const lastOverall = useRef<{ text: string; rank: number; at: number } | null>(null)
   const [speaking, setSpeaking] = useState(false)
 
   const speak = useCallback(
@@ -88,18 +96,27 @@ export function useSpeech() {
   }, [synth])
 
   const announce = useCallback(
-    (text: string, risk: Risk | null, now: number = Date.now()): boolean => {
+    (text: string, risk: Risk | null, now: number = Date.now()): Announced => {
       const rank = risk ? RISK_RANK[risk] : -1
       const last = lastOverall.current
-      if (last && last.text === text && rank <= last.rank) return false
+      if (last && last.text === text && rank <= last.rank) {
+        // Unchanged scene. Serious hazards are repeated while they stay in view; others are only refreshed rarely.
+        const every = rank >= RISK_RANK.critical ? REPEAT_CRITICAL_MS : rank >= RISK_RANK.high ? REPEAT_HIGH_MS : REFRESH_MS
+        if (now - last.at < every) return false
+        // A repeat never interrupts or queues behind other speech; if the speaker is busy, try again next time.
+        if (synth?.speaking) return false
+        lastOverall.current = { text, rank: Math.max(rank, last.rank), at: now }
+        speak(text, { interrupt: false, rank: Math.max(rank, 0) })
+        return 'repeat'
+      }
       const prev = recent.current.get(text)
       if (prev && now - prev.at < DEDUPE_MS && rank <= prev.rank) return false
       recent.current.set(text, { at: now, rank })
-      lastOverall.current = { text, rank }
+      lastOverall.current = { text, rank, at: now }
       speak(text, { interrupt: rank >= RISK_RANK.high, rank: Math.max(rank, 0) })
-      return true
+      return 'new'
     },
-    [speak],
+    [speak, synth],
   )
 
   const resetDedupe = useCallback(() => {
