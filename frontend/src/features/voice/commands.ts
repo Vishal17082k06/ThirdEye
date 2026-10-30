@@ -190,6 +190,39 @@ export function parseCommand(transcript: string): ParsedCommand | null {
   return destinationCommand(core, stripped)
 }
 
+const INTENT_LABEL: Record<Intent, string> = {
+  open_dashboard: 'Open dashboard',
+  open_ai: 'Open AI Assistance',
+  start_camera: 'Start camera',
+  stop_camera: 'Stop camera',
+  start_detection: 'Start obstacle detection',
+  stop_detection: 'Stop obstacle detection',
+  open_navigation: 'Open navigation',
+  where_am_i: 'Where am I?',
+  navigate_to: 'Take me to a destination',
+  mode_walk: 'Walking mode',
+  mode_car: 'Car mode',
+  open_rides: 'Open Book a Ride',
+  device_status: 'Check device status',
+  read_screen: 'Read screen',
+  call_guardian: 'Call guardian',
+  sos: 'Emergency SOS',
+  go_back: 'Go back',
+  stop_listening: 'Stop listening',
+  cancel: 'Cancel',
+  yes: 'Yes',
+  no: 'No',
+  choose: 'Choose an option',
+  help: 'Show help',
+}
+
+/** Short plain-language name of an interpreted command, shown next to what was heard. */
+export function describeCommand(c: ParsedCommand): string {
+  if (c.intent === 'navigate_to' && c.args.destination) return `Take me to ${c.args.destination}`
+  if (c.intent === 'choose' && c.args.index) return `Choose option ${c.args.index}`
+  return INTENT_LABEL[c.intent]
+}
+
 /** Help list shown in the panel: every supported command with an example phrase. */
 export const COMMAND_HELP: Array<{ label: string; example: string }> = [
   { label: 'Open the dashboard', example: 'Open dashboard' },

@@ -6,6 +6,7 @@ import { toPrefs, useSettings } from '../lib/settings'
 import { SosProvider } from '../features/sos/SosProvider'
 import { NavigationBar } from '../features/navigation/NavigationBar'
 import { NavigationProvider } from '../features/navigation/NavigationProvider'
+import { VoiceProvider } from '../features/voice/VoiceProvider'
 import { Sidebar } from './Sidebar'
 import { Topbar } from './Topbar'
 
@@ -81,6 +82,7 @@ export function Shell() {
   return (
     <SosProvider>
     <NavigationProvider>
+    <VoiceProvider>
     <div className="flex min-h-screen bg-canvas">
       <a
         href="#main"
@@ -103,6 +105,7 @@ export function Shell() {
         </main>
       </div>
     </div>
+    </VoiceProvider>
     </NavigationProvider>
     </SosProvider>
   )

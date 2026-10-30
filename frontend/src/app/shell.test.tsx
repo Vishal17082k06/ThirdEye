@@ -2,6 +2,9 @@ import { screen, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { useState } from 'react'
 import { describe, expect, it } from 'vitest'
+import { SosProvider } from '../features/sos/SosProvider'
+import { VoiceProvider } from '../features/voice/VoiceProvider'
+import { DEFAULT_SETTINGS, mockApi } from '../test-api'
 import { renderApp } from '../test-utils'
 import { Sidebar } from './Sidebar'
 import { Topbar } from './Topbar'
@@ -68,9 +71,19 @@ describe('Topbar', () => {
     expect(screen.getByRole('button', { name: /log out/i })).toBeInTheDocument()
   })
 
-  it('voice button opens a panel saying voice arrives later', async () => {
-    renderApp(<Topbar onOpenMobileNav={() => {}} mobileNavOpen={false} />, { mode: 'live' })
+  it('voice button opens the voice assistant panel with its controls', async () => {
+    mockApi({ 'GET /settings': DEFAULT_SETTINGS })
+    renderApp(
+      <SosProvider>
+        <VoiceProvider>
+          <Topbar onOpenMobileNav={() => {}} mobileNavOpen={false} />
+        </VoiceProvider>
+      </SosProvider>,
+      { mode: 'simulation' },
+    )
     await userEvent.click(screen.getByRole('button', { name: 'Voice assistant' }))
-    expect(screen.getByText(/not available yet/i)).toBeInTheDocument()
+    const panel = screen.getByRole('dialog', { name: 'Voice assistant' })
+    expect(within(panel).getByRole('button', { name: 'Start listening' })).toBeInTheDocument()
+    expect(within(panel).getByLabelText('Type a command')).toBeInTheDocument()
   })
 })

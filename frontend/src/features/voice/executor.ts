@@ -58,6 +58,8 @@ export interface Reply {
   showHelp?: boolean
   /** The assistant asked a question and is waiting for an answer. */
   awaiting?: boolean
+  /** With awaiting: the number of numbered options the person can pick from (touch buttons). */
+  choices?: number
 }
 
 type Pending =
@@ -189,7 +191,7 @@ export function createExecutor(getDeps: () => ExecutorDeps, opts: { timeoutMs?: 
       return ask({ kind: 'nav', place: places[0] }, `Start navigation to ${shortLabel(places[0].label)}? Say yes or no.`, parsed)
     }
     const list = places.map((p, i) => `${i + 1}, ${shortLabel(p.label)}`).join('. ')
-    return ask({ kind: 'choose', options: places }, `I found ${places.length} places. ${list}. Say the number, or say cancel.`, parsed)
+    return { ...ask({ kind: 'choose', options: places }, `I found ${places.length} places. ${list}. Say the number, or say cancel.`, parsed), choices: places.length }
   }
 
   async function dispatch(parsed: ParsedCommand): Promise<Reply> {
@@ -296,10 +298,10 @@ export function createExecutor(getDeps: () => ExecutorDeps, opts: { timeoutMs?: 
         if (intent === 'choose') {
           const idx = (parsed!.args.index ?? 0) - 1
           const place = p.options[idx]
-          if (!place) return ask(p, `There are only ${p.options.length} options. Say a number from 1 to ${p.options.length}, or say cancel.`, parsed)
+          if (!place) return { ...ask(p, `There are only ${p.options.length} options. Say a number from 1 to ${p.options.length}, or say cancel.`, parsed), choices: p.options.length }
           return ask({ kind: 'nav', place }, `Start navigation to ${shortLabel(place.label)}? Say yes or no.`, parsed)
         }
-        if (intent === 'yes') return ask(p, 'Please say the number of the place, or say cancel.', parsed)
+        if (intent === 'yes') return { ...ask(p, 'Please say the number of the place, or say cancel.', parsed), choices: p.options.length }
       } else if (p.kind === 'nav' || p.kind === 'call') {
         if (intent === 'yes') {
           clearPending()

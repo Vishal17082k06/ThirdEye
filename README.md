@@ -54,6 +54,24 @@ Without these, SOS attempts are stored as `failed` ("Email service is not config
 
 Navigation and Book a Ride show OpenStreetMap tiles (`https://tile.openstreetmap.org`), with the required "OpenStreetMap contributors" attribution link kept visible on every map. The public OSM tile servers, Nominatim (search) and the public OSRM demo server are for **demo / low-volume use only** (see the [tile usage policy](https://operations.osmfoundation.org/policies/tiles/)): no bulk downloading, no heavy traffic, and a real User-Agent with a contact address (`NOMINATIM_USER_AGENT` in `backend/.env`). For anything beyond a demo, use a commercial tile provider or self-host tiles, geocoding and routing.
 
+## Voice commands
+
+Press the microphone in the top bar, or **Alt+Shift+V**, then speak (Chrome, Edge or Safari). Firefox has no speech recognition; type the same commands in the panel's "Type a command" box. It only listens after you press, one command at a time, and never records audio.
+
+| Say | What happens |
+| --- | --- |
+| Open dashboard / Open AI assistance / Open navigation / Open book a ride | Opens that page |
+| Start camera / Stop camera | Starts or stops the AI page camera |
+| Start obstacle detection / Stop obstacle detection | Starts or stops detection (needs the camera) |
+| Where am I? | Says the address near you |
+| Take me to Gandhipuram | Searches Coimbatore, asks "Start navigation to ...? Say yes or no" |
+| Walking mode / Car mode | Changes the travel mode |
+| Check device status | Reads the real device statuses |
+| Read screen | Reads the page heading and key content |
+| Call guardian | Asks first, then opens your phone dialer |
+| Emergency SOS | Opens the SOS confirmation; nothing is sent until you confirm |
+| Go back / Stop listening / Yes / No / Cancel | Controls |
+
 ## Tests
 
 ```powershell
