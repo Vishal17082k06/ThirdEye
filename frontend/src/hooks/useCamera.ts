@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { useReportLaptopCamera, type CameraReport } from '../features/devices/useDevices'
-import { postEvent } from '../lib/events'
+import { postEvent, type ClientEventSource } from '../lib/events'
 import { useMode } from '../lib/mode'
 import { useSettings } from '../lib/settings'
 
@@ -48,7 +48,7 @@ export function fitFrame(width: number, height: number, max = MAX_FRAME_SIDE) {
  */
 export function useCamera() {
   const { mode } = useMode()
-  const source = mode === 'simulation' ? 'simulation' : 'live'
+  const source: ClientEventSource = mode === 'simulation' ? 'simulation' : 'live'
   const settings = useSettings().data?.camera
   const report = useReportLaptopCamera()
   const reportRef = useRef(report.mutateAsync)
