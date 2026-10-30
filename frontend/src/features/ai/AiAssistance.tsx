@@ -13,6 +13,7 @@ import { detectImage, EngineUnavailableError, validateImageFile, type Detection,
 import { DetectionCanvas } from './DetectionCanvas'
 import { DetectionList, HonestyNote, RiskBadge, RiskLegend, SimulatedBadge } from './parts'
 import { useDetectionLoop } from './useDetectionLoop'
+import { SimulationSection } from '../simulation/SimulationSection'
 
 export type Origin = 'camera' | 'capture' | 'upload' | 'simulated'
 
@@ -439,6 +440,8 @@ export function AiAssistance() {
           </div>
         )}
       </Card>
+
+      {simulation && <SimulationSection onScenario={(r) => present(r, 'simulated', true)} />}
 
       <div className="grid gap-6 lg:grid-cols-2">
         <Card as="section" aria-labelledby="history-heading">
