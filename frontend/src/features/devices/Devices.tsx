@@ -151,18 +151,18 @@ function DeviceCard({ device }: { device: Device }) {
   const titleId = `device-${device.key}`
 
   return (
-    <Card as="article" aria-labelledby={titleId} className="flex flex-col gap-4">
-      <div className="flex items-start gap-3">
+    <Card as="article" aria-labelledby={titleId} className="flex min-w-0 flex-col gap-4">
+      <div className="flex flex-wrap items-start gap-3">
         <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-primary-soft text-primary">
           <Icon className="h-5 w-5" aria-hidden="true" />
         </span>
-        <div className="min-w-0 flex-1">
+        <div className="min-w-0 flex-1 basis-40">
           <h2 id={titleId} className="text-lg font-bold text-ink">
             {device.name}
           </h2>
           <p className="text-sm text-muted">{INFO[device.key]}</p>
         </div>
-        <Badge tone={shown.tone}>{shown.label}</Badge>
+        <Badge tone={shown.tone} className="shrink-0">{shown.label}</Badge>
       </div>
 
       <dl className="grid gap-x-4 gap-y-1 text-sm sm:grid-cols-[auto_1fr]">
@@ -239,7 +239,7 @@ export function Devices() {
       {q.data && (
         <>
           {q.isError && <ErrorBanner message="Could not refresh devices. Showing the last known state." />}
-          <div className="grid gap-4 lg:grid-cols-2">
+          <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
             {q.data.map((d) => (
               <DeviceCard key={d.key} device={d} />
             ))}

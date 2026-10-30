@@ -90,7 +90,7 @@ export function CameraSection({ settings }: { settings: Settings['camera'] }) {
               ? 'Camera names are hidden until you grant camera permission.'
               : 'Camera names are hidden until you grant camera permission.'}
           </p>
-          <Button variant="secondary" onClick={grant} leftIcon={icon(Camera)}>
+          <Button variant="secondary" className="whitespace-normal!" onClick={grant} leftIcon={icon(Camera)}>
             Grant camera permission
           </Button>
           {permError && (
@@ -399,7 +399,7 @@ export function EmergencySection({ settings }: { settings: Settings['emergency']
         ) : email.data.configured ? (
           <Badge tone="success">Configured</Badge>
         ) : (
-          <Badge tone="danger">Not configured: SOS emails cannot be sent</Badge>
+          <Badge tone="danger" className="whitespace-normal! text-left">Not configured: SOS emails cannot be sent</Badge>
         )}
       </div>
     </SectionForm>

@@ -18,7 +18,7 @@ function kindIcon(kind: string): LucideIcon {
 function Item({ n, onRead, busy }: { n: AppNotification; onRead: (id: number) => void; busy: boolean }) {
   const Icon = kindIcon(n.kind)
   return (
-    <li className={`flex gap-3 py-3 ${n.read ? '' : 'bg-primary-soft/40 -mx-2 rounded-xl px-2'}`}>
+    <li className={`flex gap-3 py-3 ${n.read ? '' : 'bg-primary-soft/40 rounded-xl px-2'}`}>
       <span className="mt-0.5 flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-surface-muted text-primary">
         <Icon className="h-5 w-5" aria-hidden="true" />
       </span>
