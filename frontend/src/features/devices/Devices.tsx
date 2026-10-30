@@ -147,7 +147,8 @@ function DeviceCard({ device }: { device: Device }) {
   const Icon = ICON[device.key]
   const shown = STATUS_LABEL[device.status] ?? STATUS_LABEL.unknown
   const message = stateMessage(device)
-  const info = device.lastInfo ?? (device.config.lastInfo as Record<string, unknown> | undefined) ?? null
+  const rawInfo = device.config.lastInfo
+  const info = rawInfo && typeof rawInfo === 'object' ? (rawInfo as Record<string, unknown>) : null
   const titleId = `device-${device.key}`
 
   return (
@@ -178,10 +179,10 @@ function DeviceCard({ device }: { device: Device }) {
         </dd>
         {info && Object.keys(info).length > 0 && (
           <>
-            <dt className="font-semibold text-muted">Device info</dt>
+            <dt className="font-semibold text-muted">Last reported</dt>
             <dd className="text-ink">
               {Object.entries(info)
-                .map(([k, v]) => `${k}: ${String(v)}`)
+                .map(([k, v]) => `${k}: ${typeof v === 'object' && v !== null ? JSON.stringify(v) : String(v)}`)
                 .join(', ')}
             </dd>
           </>

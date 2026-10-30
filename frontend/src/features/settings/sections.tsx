@@ -2,6 +2,7 @@ import { Bot, Camera, Cpu, Mic, ShieldAlert, Accessibility as A11yIcon, Volume2 
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { Badge, Button, Input, Select, Slider, Switch } from '../../design'
+import { useResync } from '../../lib/useResync'
 import { applyAccessibility, type TextSize } from '../../lib/a11y'
 import {
   toPrefs,
@@ -24,9 +25,17 @@ type CamState = 'checking' | 'unsupported' | 'needs_permission' | 'ready'
 
 export function CameraSection({ settings }: { settings: Settings['camera'] }) {
   const update = useUpdateSettings()
-  const [deviceId, setDeviceId] = useState(settings.deviceId ?? '')
-  const [resolution, setResolution] = useState(String(settings.preferences.resolution ?? '1280x720'))
-  const [mirror, setMirror] = useState(settings.preferences.mirror === true)
+  const initial = {
+    deviceId: settings.deviceId ?? '',
+    resolution: String(settings.preferences.resolution ?? '1280x720'),
+    mirror: settings.preferences.mirror === true,
+  }
+  const [draft, setDraft] = useState(initial)
+  useResync(initial, draft, setDraft)
+  const { deviceId, resolution, mirror } = draft
+  const setDeviceId = (v: string) => setDraft((d) => ({ ...d, deviceId: v }))
+  const setResolution = (v: string) => setDraft((d) => ({ ...d, resolution: v }))
+  const setMirror = (v: boolean) => setDraft((d) => ({ ...d, mirror: v }))
   const [cams, setCams] = useState<MediaDeviceInfo[]>([])
   const [state, setState] = useState<CamState>('checking')
   const [permError, setPermError] = useState<string | null>(null)
@@ -67,7 +76,7 @@ export function CameraSection({ settings }: { settings: Settings['camera'] }) {
     await enumerate()
   }
 
-  const dirty = deviceId !== (settings.deviceId ?? '') || resolution !== String(settings.preferences.resolution ?? '1280x720') || mirror !== (settings.preferences.mirror === true)
+  const dirty = !same(draft, initial)
 
   return (
     <SectionForm
@@ -87,7 +96,7 @@ export function CameraSection({ settings }: { settings: Settings['camera'] }) {
         <div className="space-y-3 rounded-xl bg-surface-muted p-4">
           <p className="text-base text-ink">
             {cams.length === 0
-              ? 'Camera names are hidden until you grant camera permission.'
+              ? 'No camera is listed yet. Grant camera permission so the browser can show the cameras it finds.'
               : 'Camera names are hidden until you grant camera permission.'}
           </p>
           <Button variant="secondary" className="whitespace-normal!" onClick={grant} leftIcon={icon(Camera)}>
@@ -131,7 +140,9 @@ export function HardwareSection({ settings }: { settings: Settings['hardware'] }
     alert: String(settings.sensorSettings.alertDistanceCm ?? 100),
   }
   const [v, setV] = useState(initial)
+  useResync(initial, v, setV)
   const [errors, setErrors] = useState<Partial<Record<keyof typeof initial, string>>>({})
+  const trimmed = (x: typeof initial) => ({ ip: x.ip.trim(), poll: x.poll.trim(), alert: x.alert.trim() })
 
   return (
     <SectionForm
@@ -139,7 +150,7 @@ export function HardwareSection({ settings }: { settings: Settings['hardware'] }
       title="Hardware"
       description="Defaults for the hardware controller and sensors."
       icon={icon(Cpu)}
-      dirty={!same(v, initial)}
+      dirty={!same(trimmed(v), trimmed(initial))}
       onSave={async () => {
         const poll = Number(v.poll)
         const alert = Number(v.alert)
@@ -197,6 +208,7 @@ export function AiSection({ settings }: { settings: Settings['ai'] }) {
     vision: settings.openaiVisionEnabled,
   }
   const [v, setV] = useState(initial)
+  useResync(initial, v, setV)
   const [errors, setErrors] = useState<{ danger?: string; caution?: string }>({})
 
   return (
@@ -210,8 +222,8 @@ export function AiSection({ settings }: { settings: Settings['ai'] }) {
         const danger = Number(v.danger)
         const caution = Number(v.caution)
         const e = {
-          danger: Number.isFinite(danger) && danger > 0 && danger <= 20 ? undefined : 'Enter a distance from 0.1 to 20 metres.',
-          caution: Number.isFinite(caution) && caution > danger && caution <= 20 ? undefined : 'Must be larger than the danger distance, up to 20 metres.',
+          danger: Number.isFinite(danger) && danger >= 0.1 && danger <= 20 ? undefined : 'Enter a distance from 0.1 to 20 metres.',
+          caution: Number.isFinite(caution) && caution > danger && caution <= 20 ? undefined : 'Enter a distance larger than the danger distance, up to 20 metres.',
         }
         setErrors(e)
         if (e.danger || e.caution) return 'Fix the highlighted fields.'
@@ -254,6 +266,7 @@ export function VoiceSection({ settings }: { settings: Settings['voice'] }) {
   const update = useUpdateSettings()
   const initial = { enabled: settings.enabled, rate: settings.rate, voiceName: settings.voiceName ?? '', feedback: settings.feedback }
   const [v, setV] = useState(initial)
+  useResync(initial, v, setV)
   const synth = typeof window !== 'undefined' ? window.speechSynthesis : undefined
   const [voices, setVoices] = useState<SpeechSynthesisVoice[]>(() => synth?.getVoices?.() ?? [])
 
@@ -316,6 +329,7 @@ export function AccessibilitySection({ settings }: { settings: Settings['accessi
   const update = useUpdateSettings()
   const initial = { textSize: toTextSize(settings.textSize), highContrast: settings.highContrast, largeButtons: settings.largeButtons }
   const [v, setV] = useState(initial)
+  useResync(initial, v, setV)
   const savedRef = useRef(settings)
   useEffect(() => {
     savedRef.current = settings
@@ -356,6 +370,7 @@ export function EmergencySection({ settings }: { settings: Settings['emergency']
   const guardian = useGuardian()
   const email = useEmailStatus()
   const [contact, setContact] = useState(settings.contact)
+  useResync(settings.contact, contact, setContact)
   const [error, setError] = useState<string | undefined>()
 
   return (

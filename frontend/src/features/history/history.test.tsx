@@ -115,7 +115,13 @@ describe('History page', () => {
     await userEvent.type(screen.getByLabelText('From'), '2026-10-30')
     await userEvent.type(screen.getByLabelText('To'), '2026-10-01')
     expect(screen.getByText('The start date must be on or before the end date.')).toBeInTheDocument()
-    expect(api.callsTo('GET', '/events').some((c) => c.search.includes('to=2026-10-01') && c.search.includes('from=2026-10-30'))).toBe(false)
-    expect(api.callsTo('GET', '/events').length).toBeGreaterThanOrEqual(before)
+    // No request may ever carry from > to.
+    for (const c of api.callsTo('GET', '/events').slice(before)) {
+      const p = new URLSearchParams(c.search)
+      if (p.get('from') && p.get('to')) expect(p.get('from')! <= p.get('to')!).toBe(true)
+    }
+    const countAfterTyping = api.callsTo('GET', '/events').length
+    await new Promise((r) => setTimeout(r, 400))
+    expect(api.callsTo('GET', '/events').length).toBe(countAfterTyping)
   })
 })

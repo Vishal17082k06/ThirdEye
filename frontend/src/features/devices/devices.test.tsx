@@ -130,4 +130,23 @@ describe('Devices page', () => {
     expect(api.callsTo('PUT', '/devices/esp32_cam')[0].body).toEqual({ config: { ip: '192.168.1.50' } })
     expect(c.getByText('Not integrated')).toBeInTheDocument()
   })
+
+  it('renders heartbeat info from config.lastInfo under "Last reported", JSON for non-scalars', async () => {
+    mockApi({
+      'GET /devices': {
+        items: INITIAL.items.map((d) =>
+          d.key === 'vl53l0x'
+            ? { ...d, status: 'connected', last_seen: new Date().toISOString(), config: { lastInfo: { fw: '1.0', range: { min: 30, max: 2000 } } } }
+            : d,
+        ),
+      },
+    })
+    renderApp(<Devices />)
+    await screen.findByRole('article', { name: 'VL53L0X Distance Sensor' })
+    const c = within(card('VL53L0X Distance Sensor'))
+    expect(c.getByText('Last reported')).toBeInTheDocument()
+    const info = c.getByText(/fw: 1\.0/)
+    expect(info).toHaveTextContent('range: {"min":30,"max":2000}')
+    expect(info).not.toHaveTextContent('[object Object]')
+  })
 })

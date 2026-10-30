@@ -14,11 +14,13 @@ interface Options {
   mode?: Mode | null
   /** Use the real AuthProvider startup (token -> /auth/me) instead of a preset user. */
   realAuth?: boolean
+  /** Supply a client to inspect or share the cache; default has gcTime 0 so tests do not leak data. */
+  queryClient?: QueryClient
 }
 
 /** Renders with the same providers as the real app, but with a known user/mode and an in-memory router. */
-export function renderApp(ui: ReactElement, { route = '/', user = TEST_USER, mode = null, realAuth = false }: Options = {}) {
-  const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false, gcTime: 0 } } })
+export function renderApp(ui: ReactElement, { route = '/', user = TEST_USER, mode = null, realAuth = false, queryClient: client }: Options = {}) {
+  const queryClient = client ?? new QueryClient({ defaultOptions: { queries: { retry: false, gcTime: 0 } } })
   return render(
     <QueryClientProvider client={queryClient}>
       <MemoryRouter initialEntries={[route]}>

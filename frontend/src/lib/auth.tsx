@@ -1,3 +1,4 @@
+import { useQueryClient } from '@tanstack/react-query'
 import { createContext, useCallback, useContext, useEffect, useMemo, useState, type ReactNode } from 'react'
 import { api, ApiError, setUnauthorizedHandler } from './api'
 import { clearToken, getToken, setToken } from './token'
@@ -43,6 +44,7 @@ export function AuthProvider({
   /** Test hook: start in a known state without calling /auth/me. */
   initialUser?: User | null
 }) {
+  const queryClient = useQueryClient()
   const hasInitial = initialUser !== undefined
   const [user, setUser] = useState<User | null>(initialUser ?? null)
   const [status, setStatus] = useState<AuthStatus>(
@@ -72,11 +74,16 @@ export function AuthProvider({
     }
   }, [hasInitial])
 
-  const accept = useCallback((res: AuthResponse, remember: boolean) => {
+  const accept = useCallback(
+    (res: AuthResponse, remember: boolean) => {
+    // A new session must never see the previous user's cached data.
+    queryClient.clear()
     setToken(res.token, remember)
     setUser(res.user)
     setStatus('authenticated')
-  }, [])
+    },
+    [queryClient],
+  )
 
   const login = useCallback(
     async (email: string, password: string, remember: boolean) => {
@@ -94,11 +101,13 @@ export function AuthProvider({
     [accept],
   )
 
+  // Also used by the 401 handler, so an expired session clears cached data too.
   const logout = useCallback(() => {
     clearToken()
+    queryClient.clear()
     setUser(null)
     setStatus('anonymous')
-  }, [])
+  }, [queryClient])
 
   const updateUser = useCallback((patch: Partial<User>) => setUser((u) => (u ? { ...u, ...patch } : u)), [])
 

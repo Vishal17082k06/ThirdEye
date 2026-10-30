@@ -79,6 +79,45 @@ describe('NotificationBell', () => {
     await vi.waitFor(() => expect(api.callsTo('DELETE', '/notifications')).toHaveLength(1))
   })
 
+  it('labels hardware notifications with a Hardware badge', async () => {
+    mockApi({ 'GET /notifications': { items: [N(1, false, { source: 'hardware' })], unread_count: 1 } })
+    renderApp(<NotificationBell />)
+    await userEvent.click(await screen.findByRole('button', { name: /Notifications, 1 unread/ }))
+    expect(within(screen.getByRole('dialog', { name: 'Notifications' })).getByText('Hardware')).toBeInTheDocument()
+  })
+
+  it('Mark all read keeps keyboard focus inside the popover (on its heading)', async () => {
+    let read = false
+    mockApi({
+      'GET /notifications': () => ({ items: [N(1, read), N(2, read)], unread_count: read ? 0 : 2 }),
+      'POST /notifications/read-all': () => {
+        read = true
+        return { updated: 2 }
+      },
+    })
+    renderApp(<NotificationBell />)
+    await userEvent.click(await screen.findByRole('button', { name: /Notifications, 2 unread/ }))
+    const dialog = screen.getByRole('dialog', { name: 'Notifications' })
+    await userEvent.click(within(dialog).getByRole('button', { name: 'Mark all read' }))
+    await vi.waitFor(() => expect(screen.getByRole('button', { name: 'Notifications, none unread' })).toBeInTheDocument())
+    expect(document.activeElement).toBe(within(dialog).getByRole('heading', { name: 'Notifications' }))
+  })
+
+  it('only the item being marked is busy', async () => {
+    let release: () => void = () => {}
+    const gate = new Promise<void>((r) => (release = r))
+    mockApi({
+      'GET /notifications': { items: [N(1, false), N(2, false)], unread_count: 2 },
+      'POST /notifications/1/read': () => gate.then(() => N(1, true)),
+    })
+    renderApp(<NotificationBell />)
+    await userEvent.click(await screen.findByRole('button', { name: /Notifications, 2 unread/ }))
+    await userEvent.click(screen.getByRole('button', { name: 'Mark as read: Alert 1' }))
+    expect(screen.getByRole('button', { name: 'Mark as read: Alert 1' })).toBeDisabled()
+    expect(screen.getByRole('button', { name: 'Mark as read: Alert 2' })).toBeEnabled()
+    release()
+  })
+
   it('shows an empty state when there are none', async () => {
     mockApi({ 'GET /notifications': { items: [], unread_count: 0 } })
     renderApp(<NotificationBell />)

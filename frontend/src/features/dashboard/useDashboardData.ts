@@ -3,8 +3,8 @@ import { guardianIsSet, useGuardian } from '../account/useAccount'
 import { useDevices, type Device, type DeviceKey } from '../devices/useDevices'
 import { useRecentEvents, type ActivityEvent } from '../history/useEvents'
 
-export type DeviceStatus = 'connected' | 'disconnected' | 'not_integrated' | 'not_started' | 'unknown' | 'error'
-export type SosStatus = 'not_configured' | 'guardian_missing' | 'guardian_set'
+export type DeviceStatus = 'connected' | 'disconnected' | 'not_integrated' | 'not_started' | 'unknown' | 'error' | 'checking'
+export type SosStatus = 'not_configured' | 'guardian_missing' | 'guardian_set' | 'checking' | 'unknown'
 export type ActivitySource = 'live' | 'simulation' | 'hardware'
 
 export interface ActivityItem {
@@ -60,8 +60,8 @@ const toItem = (e: ActivityEvent): ActivityItem => ({
 
 /**
  * Single seam for dashboard data: real devices, guardian and recent events from the API.
- * While something is loading, or when nothing exists yet, the honest empty defaults stay;
- * if the devices request itself fails, statuses show "Unknown" rather than a guess.
+ * While a request is pending the status is "checking" (never a guessed value); if it fails the
+ * status is "unknown". Empty recent-activity lists keep their empty states.
  */
 export function useDashboardData(): DashboardData {
   const devices = useDevices()
@@ -76,7 +76,8 @@ export function useDashboardData(): DashboardData {
     const pick = (key: DeviceKey, fallback: DeviceStatus): DeviceStatus => {
       const d = byKey.get(key)
       if (d) return d.status
-      return devices.isError ? 'unknown' : fallback
+      if (devices.isError) return 'unknown'
+      return devices.isPending ? 'checking' : fallback
     }
     const d = EMPTY_DASHBOARD.devices
     return {
@@ -89,7 +90,13 @@ export function useDashboardData(): DashboardData {
         battery: pick('battery', d.battery),
       },
       aiAssistance: EMPTY_DASHBOARD.aiAssistance,
-      sos: guardian.data ? (guardianIsSet(guardian.data) ? 'guardian_set' : 'guardian_missing') : 'not_configured',
+      sos: guardian.data
+        ? guardianIsSet(guardian.data)
+          ? 'guardian_set'
+          : 'guardian_missing'
+        : guardian.isError
+          ? 'unknown'
+          : 'checking',
       recent: {
         obstacles: (obstacles.data?.items ?? []).map(toItem),
         navigation: (navigation.data?.items ?? []).map(toItem),
@@ -97,5 +104,5 @@ export function useDashboardData(): DashboardData {
         emergencies: (sos.data?.items ?? []).map(toItem),
       },
     }
-  }, [devices.data, devices.isError, devices.isPending, guardian.data, obstacles.data, navigation.data, rides.data, sos.data])
+  }, [devices.data, devices.isError, devices.isPending, guardian.data, guardian.isError, obstacles.data, navigation.data, rides.data, sos.data])
 }

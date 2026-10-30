@@ -12,8 +12,6 @@ export interface Device {
   last_seen: string | null
   config: Record<string, unknown>
   error: string | null
-  /** Info sent with the latest hardware heartbeat (server stores it separately from config). */
-  lastInfo?: Record<string, unknown> | null
 }
 
 export const DEVICES_KEY = ['devices'] as const

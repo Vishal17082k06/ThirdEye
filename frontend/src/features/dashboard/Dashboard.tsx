@@ -33,6 +33,7 @@ const DEVICE: Record<DeviceStatus, Shown> = {
   not_started: { label: 'Not started', tone: 'neutral' },
   unknown: { label: 'Unknown', tone: 'neutral' },
   error: { label: 'Error', tone: 'danger' },
+  checking: { label: 'Checking…', tone: 'neutral' },
 }
 
 const GPS: Record<GpsState, Shown> = {
@@ -46,6 +47,8 @@ const SOS: Record<SosStatus, Shown> = {
   not_configured: { label: 'Not configured yet', tone: 'neutral' },
   guardian_missing: { label: 'Guardian not set', tone: 'warning' },
   guardian_set: { label: 'Guardian set', tone: 'success' },
+  checking: { label: 'Checking…', tone: 'neutral' },
+  unknown: { label: 'Unknown', tone: 'neutral' },
 }
 
 interface StatusCardProps {
@@ -58,8 +61,9 @@ interface StatusCardProps {
 }
 
 function StatusCard({ icon: Icon, title, shown, detail, to, linkText }: StatusCardProps) {
+  const checking = shown.label.startsWith('Checking')
   return (
-    <Card as="article" className="flex flex-col gap-3">
+    <Card as="article" aria-busy={checking || undefined} className="flex flex-col gap-3">
       <div className="flex items-center gap-3">
         <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-primary-soft text-primary">
           <Icon className="h-5 w-5" aria-hidden="true" />
@@ -192,9 +196,9 @@ export function Dashboard() {
             icon={Camera}
             title="Camera"
             shown={DEVICE[data.devices.camera]}
-            detail="Laptop or USB webcam. Starts when you open AI Assistance and allow camera access."
-            to="/ai"
-            linkText="Start the camera"
+            detail="Laptop or USB webcam. Use Check camera in Device Management to test it; the status is what the browser last reported."
+            to="/devices"
+            linkText="Check camera"
           />
           <StatusCard
             icon={Radar}

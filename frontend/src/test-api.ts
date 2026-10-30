@@ -24,7 +24,7 @@ export function mockApi(routes: Record<string, Handler>) {
     calls.push({ method, path, search: url.search, body })
     const h = routes[`${method} ${path}`]
     if (h === undefined) return new Response(JSON.stringify({ detail: 'Not found' }), { status: 404 })
-    const out = typeof h === 'function' ? (h as (b: unknown, u: URL) => unknown)(body, url) : h
+    const out = await (typeof h === 'function' ? (h as (b: unknown, u: URL) => unknown)(body, url) : h)
     if (out && typeof out === 'object' && '__status' in out) {
       const o = out as { __status: number; body: unknown }
       return new Response(JSON.stringify(o.body), { status: o.__status })

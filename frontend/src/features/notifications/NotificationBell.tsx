@@ -37,6 +37,11 @@ function Item({ n, onRead, busy }: { n: AppNotification; onRead: (id: number) =>
               Simulation
             </Badge>
           )}
+          {n.source === 'hardware' && (
+            <Badge tone="hardware" icon={<Cpu className="h-3.5 w-3.5" aria-hidden="true" />}>
+              Hardware
+            </Badge>
+          )}
         </p>
         {!n.read && (
           <button
@@ -60,6 +65,7 @@ export function NotificationBell() {
   const toast = useToast()
   const [confirming, setConfirming] = useState(false)
   const bellRef = useRef<HTMLButtonElement>(null)
+  const headingRef = useRef<HTMLHeadingElement>(null)
   const unread = q.data?.unread_count ?? 0
   const items = q.data?.items ?? []
 
@@ -110,7 +116,9 @@ export function NotificationBell() {
         {(close) => (
           <div>
             <div className="flex items-center justify-between gap-2">
-              <p className="font-bold text-ink">Notifications</p>
+              <h2 ref={headingRef} tabIndex={-1} className="font-bold text-ink outline-none">
+                Notifications
+              </h2>
               <p className="text-sm text-muted">{unread > 0 ? `${unread} unread` : 'All read'}</p>
             </div>
             {q.isError && !q.data && <p className="mt-2 text-sm font-semibold text-danger">Could not load notifications.</p>}
@@ -126,7 +134,7 @@ export function NotificationBell() {
                   <Item
                     key={n.id}
                     n={n}
-                    busy={markRead.isPending}
+                    busy={markRead.isPending && markRead.variables === n.id}
                     onRead={(id) => markRead.mutate(id, { onError: fail })}
                   />
                 ))}
@@ -139,7 +147,13 @@ export function NotificationBell() {
                   className="min-h-[var(--control-h)] px-3 text-sm"
                   disabled={unread === 0}
                   loading={markAllRead.isPending}
-                  onClick={() => markAllRead.mutate(undefined, { onError: fail })}
+                  onClick={() =>
+                    markAllRead.mutate(undefined, {
+                      onError: fail,
+                      // The button disables itself once nothing is unread; keep focus inside the popover.
+                      onSettled: () => headingRef.current?.focus(),
+                    })
+                  }
                 >
                   Mark all read
                 </Button>

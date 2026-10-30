@@ -1,3 +1,4 @@
+import { QueryClient } from '@tanstack/react-query'
 import { screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
@@ -104,7 +105,45 @@ describe('Settings page', () => {
     await userEvent.type(ip, '999.1.1.1')
     await userEvent.click(screen.getByRole('button', { name: 'Save hardware' }))
     expect(screen.getByText('Each part of an IP address must be between 0 and 255.')).toBeInTheDocument()
-    await waitFor(() => expect(api.callsTo('PUT', '/settings')).toHaveLength(0))
+    // The save handler is async: wait until the button leaves its loading state, then assert nothing was sent.
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Save hardware' })).not.toHaveAttribute('aria-busy'))
+    expect(api.callsTo('PUT', '/settings')).toHaveLength(0)
+  })
+
+  it('hardware: trailing spaces alone do not count as an unsaved change', async () => {
+    mockApi(routes({ 'GET /settings': { ...DEFAULT_SETTINGS, hardware: { ...DEFAULT_SETTINGS.hardware, deviceIp: '192.168.1.5' } } }))
+    renderApp(<Settings />)
+    const ip = await screen.findByLabelText('Default hardware IP or hostname')
+    await userEvent.type(ip, '  ')
+    expect(screen.queryByText('Unsaved changes')).not.toBeInTheDocument()
+    await userEvent.type(ip, '9')
+    expect(screen.getByText('Unsaved changes')).toBeInTheDocument()
+  })
+
+  it('ai: the rule and the message agree (danger 0.1 to 20 m, caution above danger)', async () => {
+    const api = mockApi(routes({ 'PUT /settings': DEFAULT_SETTINGS }))
+    renderApp(<Settings />)
+    const danger = await screen.findByLabelText('Danger distance (m)')
+    await userEvent.clear(danger)
+    await userEvent.type(danger, '0.05')
+    await userEvent.click(screen.getByRole('button', { name: 'Save ai' }))
+    expect(screen.getByText('Enter a distance from 0.1 to 20 metres.')).toBeInTheDocument()
+    expect(api.callsTo('PUT', '/settings')).toHaveLength(0)
+    await userEvent.clear(danger)
+    await userEvent.type(danger, '0.1')
+    await userEvent.click(screen.getByRole('button', { name: 'Save ai' }))
+    expect(await screen.findByText('AI settings saved')).toBeInTheDocument()
+  })
+
+  it('resyncs a clean section when fresh settings arrive', async () => {
+    let doc = DEFAULT_SETTINGS
+    mockApi(routes({ 'GET /settings': () => doc }))
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+    renderApp(<Settings />, { queryClient: client })
+    await screen.findByLabelText('Polling interval (ms)')
+    doc = { ...DEFAULT_SETTINGS, hardware: { ...DEFAULT_SETTINGS.hardware, pollingIntervalMs: 2500 } }
+    await client.refetchQueries({ queryKey: ['settings'] })
+    expect(await screen.findByDisplayValue('2500')).toBeInTheDocument()
   })
 
   it('camera: without permission shows a grant button that requests then re-enumerates', async () => {

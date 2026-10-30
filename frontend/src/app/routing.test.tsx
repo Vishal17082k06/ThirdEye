@@ -1,9 +1,10 @@
 import { screen } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { Route, Routes } from 'react-router-dom'
-import { beforeEach, describe, expect, it } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { Dashboard } from '../features/dashboard/Dashboard'
 import { PortalSelect } from '../features/portal/PortalSelect'
+import { mockApi } from '../test-api'
 import { renderApp } from '../test-utils'
 import { ProtectedRoute } from './ProtectedRoute'
 
@@ -73,13 +74,31 @@ describe('PortalSelect', () => {
   })
 })
 
+afterEach(() => vi.unstubAllGlobals())
+
 describe('Dashboard', () => {
-  it('shows honest statuses for every item and never a connected device', () => {
+  it('shows honest statuses for every item and never a connected device', async () => {
+    const dev = (key: string, status: string) => ({ key, name: key, status, last_seen: null, config: {}, error: null })
+    mockApi({
+      'GET /devices': {
+        items: [
+          dev('laptop_camera', 'unknown'),
+          dev('esp32_cam', 'not_integrated'),
+          dev('vl53l0x', 'disconnected'),
+          dev('vibration_motor', 'not_integrated'),
+          dev('battery', 'not_integrated'),
+        ],
+      },
+      'GET /guardian': { name: '', email: '', phone: '', relationship: '' },
+      'GET /events': { items: [], total: 0, limit: 5, offset: 0 },
+    })
     renderApp(<Dashboard />, { mode: 'simulation' })
     expect(screen.getByText('Welcome, Asha')).toBeInTheDocument()
-    expect(screen.getByText('Disconnected')).toBeInTheDocument() // VL53L0X
+    expect(await screen.findByText('Disconnected')).toBeInTheDocument() // VL53L0X
     expect(screen.getAllByText('Not integrated')).toHaveLength(3) // ESP32-CAM, vibration, battery
-    expect(screen.getAllByText('Not started')).toHaveLength(2) // AI assistance, camera
+    expect(screen.getAllByText('Unknown').length).toBeGreaterThanOrEqual(1) // laptop camera
+    expect(screen.getAllByText('Not started')).toHaveLength(1) // AI assistance
+    expect(screen.getByText('Guardian not set')).toBeInTheDocument()
     expect(screen.queryByText('Connected')).not.toBeInTheDocument()
     for (const name of [
       'AI assistance',

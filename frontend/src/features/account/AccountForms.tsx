@@ -3,6 +3,7 @@ import { useRef, useState, type FormEvent, type ReactNode } from 'react'
 import { Button, Card, CardHeader, Input, Select, Spinner, useToast } from '../../design'
 import { ApiError } from '../../lib/api'
 import { useAuth } from '../../lib/auth'
+import { useResync } from '../../lib/useResync'
 import { ErrorBanner } from '../auth/FormBanner'
 import { stripEmpty, validateConfirm } from '../auth/validation'
 import {
@@ -59,21 +60,24 @@ function focusFirstInvalid(form: HTMLFormElement | null) {
 
 /* ---------- Personal information ---------- */
 
+const toProfileValues = (p: { name: string; age: number | null; email: string; phone: string }) => ({
+  name: p.name,
+  age: p.age === null ? '' : String(p.age),
+  email: p.email,
+  phone: p.phone,
+})
+
 function ProfileFields({ initial }: { initial: { name: string; age: number | null; email: string; phone: string } }) {
   const save = useSaveProfile()
   const toast = useToast()
   const { updateUser } = useAuth()
-  const [values, setValues] = useState({
-    name: initial.name,
-    age: initial.age === null ? '' : String(initial.age),
-    email: initial.email,
-    phone: initial.phone,
-  })
-  const [saved, setSaved] = useState(values)
+  const server = toProfileValues(initial)
+  const [values, setValues] = useState(server)
+  useResync(server, values, setValues)
   const [errors, setErrors] = useState<Partial<Record<keyof typeof values, string>>>({})
   const [serverError, setServerError] = useState<string | null>(null)
   const formRef = useRef<HTMLFormElement>(null)
-  const dirty = JSON.stringify(values) !== JSON.stringify(saved)
+  const dirty = JSON.stringify(values) !== JSON.stringify(server)
 
   const bind = (f: keyof typeof values) => ({
     value: values[f],
@@ -99,9 +103,7 @@ function ProfileFields({ initial }: { initial: { name: string; age: number | nul
         email: values.email.trim(),
         phone: values.phone.replace(/[\s-]/g, ''),
       })
-      const next = { name: p.name, age: p.age === null ? '' : String(p.age), email: p.email, phone: p.phone }
-      setValues(next)
-      setSaved(next)
+      setValues(toProfileValues(p))
       updateUser({ name: p.name, email: p.email, phone: p.phone })
       toast.show({ tone: 'success', title: 'Profile saved' })
     } catch (err) {
@@ -132,6 +134,7 @@ function ProfileFields({ initial }: { initial: { name: string; age: number | nul
 
 export function ProfileForm({ id = 'profile' }: { id?: string }) {
   const q = useProfile()
+  const { user } = useAuth()
   return (
     <Card as="section" aria-labelledby={`${id}-title`} id={id}>
       <CardHeader
@@ -141,7 +144,7 @@ export function ProfileForm({ id = 'profile' }: { id?: string }) {
         icon={<UserRound className="h-5 w-5" aria-hidden="true" />}
       />
       <LoadState loading={q.isPending} error={q.isError} onRetry={() => q.refetch()}>
-        {q.data && <ProfileFields initial={q.data} />}
+        {q.data && <ProfileFields key={user?.id} initial={q.data} />}
       </LoadState>
     </Card>
   )
@@ -166,12 +169,13 @@ function toValues(g: Guardian) {
 function GuardianFields({ initial }: { initial: Guardian }) {
   const save = useSaveGuardian()
   const toast = useToast()
-  const [values, setValues] = useState(() => toValues(initial))
-  const [saved, setSaved] = useState(values)
+  const server = toValues(initial)
+  const [values, setValues] = useState(server)
+  useResync(server, values, setValues)
   const [errors, setErrors] = useState<Partial<Record<keyof typeof values, string>>>({})
   const [serverError, setServerError] = useState<string | null>(null)
   const formRef = useRef<HTMLFormElement>(null)
-  const dirty = JSON.stringify(values) !== JSON.stringify(saved)
+  const dirty = JSON.stringify(values) !== JSON.stringify(server)
 
   const bind = (f: 'name' | 'email' | 'phone' | 'relOther') => ({
     value: values[f],
@@ -198,9 +202,7 @@ function GuardianFields({ initial }: { initial: Guardian }) {
         phone: values.phone.replace(/[\s-]/g, ''),
         relationship: values.relSel === OTHER ? values.relOther.trim() : values.relSel,
       })
-      const next = toValues(g)
-      setValues(next)
-      setSaved(next)
+      setValues(toValues(g))
       toast.show({ tone: 'success', title: 'Guardian saved' })
     } catch (err) {
       setServerError(msg(err))
@@ -244,6 +246,7 @@ function GuardianFields({ initial }: { initial: Guardian }) {
 
 export function GuardianForm({ id = 'guardian' }: { id?: string }) {
   const q = useGuardian()
+  const { user } = useAuth()
   return (
     <Card as="section" aria-labelledby={`${id}-title`} id={id}>
       <CardHeader
@@ -253,7 +256,7 @@ export function GuardianForm({ id = 'guardian' }: { id?: string }) {
         icon={<ShieldCheck className="h-5 w-5" aria-hidden="true" />}
       />
       <LoadState loading={q.isPending} error={q.isError} onRetry={() => q.refetch()}>
-        {q.data && <GuardianFields initial={q.data} />}
+        {q.data && <GuardianFields key={user?.id} initial={q.data} />}
       </LoadState>
     </Card>
   )
