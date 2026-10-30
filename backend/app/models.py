@@ -135,3 +135,5 @@ class SosEvent(Base):
     note: Mapped[str | None] = mapped_column(String(300), nullable=True)
     guardian_name: Mapped[str | None] = mapped_column(String(120), nullable=True)
     sent_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    # When the current send attempt was claimed; used to detect a stuck 'pending'.
+    attempted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)

@@ -13,6 +13,7 @@ so two simultaneous retries cannot both send.
 """
 
 import html
+import logging
 import re
 from datetime import datetime, timedelta, timezone
 from typing import Annotated
@@ -20,7 +21,7 @@ from zoneinfo import ZoneInfo
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from pydantic import BaseModel, Field, StringConstraints, model_validator
-from sqlalchemy import func, select, update
+from sqlalchemy import and_, func, or_, select, update
 from sqlalchemy.orm import Session
 
 from app.config import settings
@@ -32,14 +33,16 @@ from app.services.events import record_event
 from app.services.mailer import Mailer, MailerError, clean_header, get_mailer
 
 router = APIRouter(prefix="/sos", tags=["sos"])
+logger = logging.getLogger(__name__)
 
 DOUBLE_TAP_WINDOW_S = 10
+STALE_PENDING_S = 120  # a 'pending' older than this is presumed stuck and may be retried
 IST = ZoneInfo("Asia/Kolkata")
 NO_GUARDIAN = "Add a guardian email in Profile before sending SOS."
 NO_LOCATION = "Location: not available — GPS location could not be obtained."
 FOOTER = "Sent by Third Eye. Please try to contact them immediately."
 GENERIC_FAILURE = "Unexpected error while sending the email."
-EMAIL_RE = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
+EMAIL_RE = re.compile(r"^[^@\s,;<>]+@[^@\s,;<>]+\.[^@\s,;<>]+$")
 
 
 class SosCreate(BaseModel):
@@ -72,6 +75,7 @@ class SosOut(BaseModel):
     sent_at: UtcDatetime | None
     note: str | None
     delivery_message: str
+    retry_available: bool
 
 
 class SosList(BaseModel):
@@ -87,6 +91,13 @@ class SosStatus(BaseModel):
     guardian_name: str | None
 
 
+def _is_stale_pending(row: SosEvent) -> bool:
+    if row.status != "pending":
+        return False
+    started = row.attempted_at or row.created_at
+    return _as_utc(started) < utcnow() - timedelta(seconds=STALE_PENDING_S)
+
+
 def _delivery_message(row: SosEvent) -> str:
     if row.status == "sent":
         return (
@@ -95,6 +106,8 @@ def _delivery_message(row: SosEvent) -> str:
         )
     if row.status == "failed":
         return row.error or GENERIC_FAILURE
+    if _is_stale_pending(row):
+        return "Still sending after more than 2 minutes — the email may not have gone out. You can retry."
     return "Sending…"
 
 
@@ -114,6 +127,7 @@ def to_out(row: SosEvent) -> SosOut:
         sent_at=row.sent_at,
         note=row.note,
         delivery_message=_delivery_message(row),
+        retry_available=row.status == "failed" or _is_stale_pending(row),
     )
 
 
@@ -178,38 +192,72 @@ def _build_email(user: User, row: SosEvent) -> tuple[str, str, str]:
     return subject, text, "\n".join(parts)
 
 
-def _attempt_send(db: Session, user: User, row: SosEvent, mailer: Mailer) -> SosEvent:
-    """Send the email for `row` (already claimed, status 'pending') and record the outcome."""
-    subject, text, body_html = _build_email(user, row)
+def _attempt_send(db: Session, user: User, row: SosEvent, mailer: Mailer) -> SosOut:
+    """Send the email for `row` (already claimed, status 'pending') and record the outcome.
+
+    Once the mail server has accepted the message nothing below may turn that into an
+    error response: DB/notification problems are logged, never raised."""
     error: str | None = None
     try:
+        subject, text, body_html = _build_email(user, row)
         mailer.send(row.guardian_email, subject, text, body_html)
     except MailerError as exc:
         error = str(exc)
     except Exception:  # never leak internals; delivery failure is still a 200 'failed'
+        logger.exception("Unexpected error while sending SOS %s", row.id)
         error = GENERIC_FAILURE
-    row.status = "failed" if error else "sent"
-    row.error = error
-    row.sent_at = None if error else utcnow()
-    db.commit()
+
+    def apply() -> None:
+        row.status = "failed" if error else "sent"
+        row.error = error
+        row.sent_at = None if error else utcnow()
+
+    try:
+        apply()
+        out = to_out(row)  # built from memory so it survives a failing commit
+    except Exception:
+        logger.exception("Could not finalise SOS %s", row.id)
+        raise
+    for attempt in (1, 2):
+        try:
+            apply()
+            db.commit()
+            break
+        except Exception:
+            logger.exception("Could not store the outcome of SOS %s (attempt %s)", row.id, attempt)
+            try:
+                db.rollback()
+            except Exception:
+                logger.exception("Rollback failed for SOS %s", row.id)
+    else:
+        logger.critical(
+            "SOS %s outcome %r could NOT be saved; returning it from memory only", row.id, out.status
+        )
     name = row.guardian_name or row.guardian_email
     if error:
         notify = {"kind": "sos", "title": "SOS email FAILED — tap to retry", "body": error}
         title = f"SOS email to {name} failed"
     else:
-        notify = {"kind": "sos", "title": f"SOS email sent to {name}", "body": _delivery_message(row)}
+        notify = {"kind": "sos", "title": f"SOS email sent to {name}", "body": out.delivery_message}
         title = f"SOS email sent to {name}"
-    record_event(
-        db,
-        user.id,
-        "sos",
-        title,
-        source="live",
-        details={"sos_id": row.id, "attempt": row.attempts},
-        status="failed" if error else "ok",
-        notify=notify,
-    )
-    return row
+    try:
+        record_event(
+            db,
+            user.id,
+            "sos",
+            title,
+            source="live",
+            details={"sos_id": out.id, "attempt": out.attempts},
+            status="failed" if error else "ok",
+            notify=notify,
+        )
+    except Exception:
+        logger.exception("Could not record the event/notification for SOS %s", out.id)
+        try:
+            db.rollback()
+        except Exception:
+            logger.exception("Rollback failed for SOS %s", out.id)
+    return out
 
 
 def _own(db: Session, user: User, sos_id: int) -> SosEvent:
@@ -251,7 +299,10 @@ def create_sos(
         select(SosEvent)
         .where(
             SosEvent.user_id == user.id,
-            SosEvent.created_at >= utcnow() - timedelta(seconds=DOUBLE_TAP_WINDOW_S),
+            # A recent FAILED record must not block a new attempt.
+            SosEvent.status.in_(("sent", "pending")),
+            func.coalesce(SosEvent.attempted_at, SosEvent.created_at)
+            >= utcnow() - timedelta(seconds=DOUBLE_TAP_WINDOW_S),
         )
         .order_by(SosEvent.id.desc())
     )
@@ -269,10 +320,11 @@ def create_sos(
         guardian_email=guardian.email.strip(),
         guardian_name=guardian.name,
         attempts=1,
+        attempted_at=utcnow(),
     )
     db.add(row)
     db.commit()
-    return to_out(_attempt_send(db, user, row, mailer))
+    return _attempt_send(db, user, row, mailer)
 
 
 @router.get("", response_model=SosList)
@@ -306,13 +358,27 @@ def retry_sos(
     mailer: Mailer = Depends(get_mailer),
 ) -> SosOut:
     row = _own(db, user, sos_id)
+    now = utcnow()
+    stale_before = now - timedelta(seconds=STALE_PENDING_S)
+    # Atomic claim: only a failed row, or a pending one whose last attempt started more
+    # than STALE_PENDING_S ago. A concurrent retry sees a fresh attempted_at and matches 0 rows.
     claimed = db.execute(
         update(SosEvent)
-        .where(SosEvent.id == sos_id, SosEvent.user_id == user.id, SosEvent.status == "failed")
-        .values(status="pending", error=None, attempts=SosEvent.attempts + 1)
+        .where(
+            SosEvent.id == sos_id,
+            SosEvent.user_id == user.id,
+            or_(
+                SosEvent.status == "failed",
+                and_(
+                    SosEvent.status == "pending",
+                    func.coalesce(SosEvent.attempted_at, SosEvent.created_at) < stale_before,
+                ),
+            ),
+        )
+        .values(status="pending", error=None, attempted_at=now, attempts=SosEvent.attempts + 1)
     )
     db.commit()
     if claimed.rowcount != 1:
-        raise HTTPException(status.HTTP_409_CONFLICT, "Only a failed SOS can be retried.")
+        raise HTTPException(status.HTTP_409_CONFLICT, "Only a failed or stuck SOS can be retried.")
     db.refresh(row)
-    return to_out(_attempt_send(db, user, row, mailer))
+    return _attempt_send(db, user, row, mailer)
