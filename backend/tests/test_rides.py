@@ -68,7 +68,7 @@ def test_fare_uses_configured_rates(client, h, monkeypatch):
 
 
 def test_walk_has_no_fare(client, h):
-    d = book(client, h, mode="walk").json()
+    d = book(client, h, mode="walk", duration_s=2400).json()
     assert d["fare_estimate"] is None and d["fare_note"] is None
     assert d["disclaimer"] == DISCLAIMER
 
@@ -133,9 +133,10 @@ def test_same_place_rejected(client, h):
 def test_distance_plausibility(client, h):
     # straight line is about 2.1 km
     assert book(client, h, distance_m=1000).status_code == 422
-    r = book(client, h, distance_m=30000)
+    r = book(client, h, distance_m=9000)  # more than 4x the straight line
     assert r.status_code == 422 and r.json()["detail"] == "distance does not match the route"
-    assert book(client, h, distance_m=2000).status_code == 201
+    assert book(client, h, distance_m=8000, duration_s=900).status_code == 201
+    assert book(client, h, distance_m=2000, mode="bike").status_code == 201
 
 
 def test_booking_id_generator():
@@ -147,7 +148,7 @@ def test_booking_id_generator():
 
 
 def test_booking_id_unique_with_retry(client, h, monkeypatch):
-    first = book(client, h).json()["booking_id"]
+    first = book(client, h, mode="bike").json()["booking_id"]
     seq = iter([first, first, "TE-20300101-ABCD"])
     monkeypatch.setattr("app.routers.rides.generate_booking_id", lambda: next(seq))
     r = book(client, h)
@@ -155,7 +156,10 @@ def test_booking_id_unique_with_retry(client, h, monkeypatch):
 
 
 def test_list_newest_first_scoped_paged(client, h):
-    ids = [book(client, h, distance_m=2800 + i).json()["id"] for i in range(3)]
+    ids = [
+        book(client, h, destination={**DEST, "lat": DEST["lat"] + i * 0.001}).json()["id"]
+        for i in range(3)
+    ]
     other = auth_header(register(client, email="other@example.com").json()["token"])
     book(client, other)
     r = client.get("/api/rides", headers=h).json()
@@ -207,3 +211,76 @@ def test_events_and_notifications_logged(client, h):
     notes = client.get("/api/notifications", headers=h).json()["items"]
     assert len(notes) == 2 and all(n["kind"] == "booking" and n["source"] == "live" for n in notes)
     assert all("driver" not in n["title"].lower() or "no driver" in n["body"].lower() for n in notes)
+
+
+@pytest.mark.parametrize("dur", [86401, 1e9])
+def test_duration_upper_bound(client, h, dur):
+    assert book(client, h, duration_s=dur).status_code == 422
+
+
+def test_duration_max_accepted(client, h):
+    assert book(client, h, mode="walk", duration_s=86400).status_code == 201
+
+
+@pytest.mark.parametrize(
+    "mode,duration",
+    [("walk", 600), ("bike", 150), ("car", 60)],  # 16.8, 67 and 168 km/h for 2.8 km
+)
+def test_absurd_speed_rejected(client, h, mode, duration):
+    r = book(client, h, mode=mode, duration_s=duration)
+    assert r.status_code == 422 and "speed" in r.json()["detail"].lower()
+
+
+def test_plausible_speed_accepted(client, h):
+    assert book(client, h, mode="bike", duration_s=600).status_code == 201
+
+
+def test_labels_stripped_and_whitespace_rejected(client, h):
+    r = book(client, h, pickup={**PICKUP, "label": "  Junction  "})
+    assert r.json()["pickup"]["label"] == "Junction"
+    assert book(client, h, destination={**DEST, "label": "   "}).status_code == 422
+
+
+def test_booking_id_uses_india_date(monkeypatch):
+    from datetime import datetime, timezone
+
+    import app.routers.rides as rides
+
+    class FakeDT(datetime):
+        @classmethod
+        def now(cls, tz=None):
+            # 20:00 UTC on 31 Dec is already 1 Jan 01:30 in India
+            return datetime(2030, 12, 31, 20, 0, tzinfo=timezone.utc).astimezone(tz)
+
+    monkeypatch.setattr(rides, "datetime", FakeDT)
+    assert rides.generate_booking_id().startswith("TE-20310101-")
+
+
+def test_idempotent_recent_duplicate(client, h):
+    a = book(client, h)
+    b = book(client, h)
+    assert a.status_code == 201 and b.status_code == 200
+    assert a.json()["id"] == b.json()["id"]
+    assert client.get("/api/rides", headers=h).json()["total"] == 1
+    assert len(client.get("/api/events?type=ride", headers=h).json()["items"]) == 1
+
+
+def test_duplicate_of_other_mode_or_user_or_old_is_new(client, h):
+    from datetime import timedelta
+
+    from app.models import Ride, utcnow
+
+    first = book(client, h).json()
+    assert book(client, h, mode="bike").status_code == 201
+    other = auth_header(register(client, email="other@example.com").json()["token"])
+    assert book(client, other).status_code == 201
+    with client.session_factory() as db:
+        db.get(Ride, first["id"]).created_at = utcnow() - timedelta(seconds=120)
+        db.commit()
+    assert book(client, h).status_code == 201
+
+
+def test_duplicate_after_cancel_is_new(client, h):
+    first = book(client, h).json()
+    client.post(f"/api/rides/{first['id']}/cancel", headers=h)
+    assert book(client, h).status_code == 201

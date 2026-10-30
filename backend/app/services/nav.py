@@ -1,9 +1,15 @@
 """Navigation providers: Nominatim (geocoding) and OSM-hosted OSRM (routing).
 
 All network access goes through an injected httpx.AsyncClient so tests can fake it.
+
+Naming note: the route endpoint takes mode foot|car|bike (OSRM profile names),
+while rides use walk|car|bike. They map one-to-one, walk <-> foot; the frontend
+converts when it books the ride it just routed. There is deliberately no mapping
+code on the server, so neither API silently accepts the other's vocabulary.
 """
 
 import asyncio
+import math
 import time
 from typing import Any
 
@@ -21,6 +27,7 @@ CACHE_TTL_S = 600
 CACHE_MAX = 256
 MIN_INTERVAL_S = 1.0  # Nominatim usage policy: at most one request per second
 NO_PLACES_NOTE = "No matching places inside Coimbatore"
+NO_SEGMENT = "No road or path found near one of these points"
 BIKE_UNAVAILABLE = "Bicycle routing is not available for this trip"
 OSRM_PATHS = {"foot": "routed-foot", "car": "routed-car", "bike": "routed-bike"}
 
@@ -33,6 +40,10 @@ class NoRouteError(Exception):
     """The provider answered but found no route."""
 
 
+class NoSegmentError(NoRouteError):
+    """A point is too far from any road/path the provider knows about."""
+
+
 # ---- cache + rate limit (process-local state) ----
 
 _cache: dict[str, tuple[float, Any]] = {}
@@ -41,7 +52,8 @@ _last_call = 0.0
 
 
 def reset_state() -> None:
-    global _last_call
+    global _last_call, _lock
+    _lock = asyncio.Lock()  # a lock binds to the event loop it first waits in
     _cache.clear()
     _last_call = 0.0
 
@@ -67,19 +79,19 @@ def _headers() -> dict[str, str]:
 
 
 async def _nominatim_get(client: httpx.AsyncClient, path: str, params: dict[str, Any]) -> Any:
+    """One rate-limited Nominatim call. The caller must hold `_lock`."""
     global _last_call
-    async with _lock:
-        wait = _last_call + MIN_INTERVAL_S - time.monotonic()
-        if wait > 0:
-            await asyncio.sleep(wait)
-        try:
-            resp = await client.get(
-                f"{NOMINATIM_URL}{path}", params=params, headers=_headers(), timeout=GEOCODE_TIMEOUT_S
-            )
-        except httpx.HTTPError as exc:
-            raise ProviderError("The place search service is unavailable right now.") from exc
-        finally:
-            _last_call = time.monotonic()
+    wait = _last_call + MIN_INTERVAL_S - time.monotonic()
+    if wait > 0:
+        await asyncio.sleep(wait)
+    try:
+        resp = await client.get(
+            f"{NOMINATIM_URL}{path}", params=params, headers=_headers(), timeout=GEOCODE_TIMEOUT_S
+        )
+    except httpx.HTTPError as exc:
+        raise ProviderError("The place search service is unavailable right now.") from exc
+    finally:
+        _last_call = time.monotonic()
     if resp.status_code != 200:
         raise ProviderError("The place search service is unavailable right now.")
     try:
@@ -93,19 +105,23 @@ async def search_places(client: httpx.AsyncClient, q: str) -> dict[str, Any]:
     cached = _cache_get(key)
     if cached is not None:
         return cached
-    data = await _nominatim_get(
-        client,
-        "/search",
-        {
-            "q": q,
-            "format": "jsonv2",
-            "limit": 8,
-            "viewbox": "{west},{north},{east},{south}".format(**COIMBATORE_BOUNDS),
-            "bounded": 1,
-            "countrycodes": "in",
-            "addressdetails": 0,
-        },
-    )
+    async with _lock:
+        cached = _cache_get(key)  # single-flight: an identical request may have just filled it
+        if cached is not None:
+            return cached
+        data = await _nominatim_get(
+            client,
+            "/search",
+            {
+                "q": q,
+                "format": "jsonv2",
+                "limit": 8,
+                "viewbox": "{west},{north},{east},{south}".format(**COIMBATORE_BOUNDS),
+                "bounded": 1,
+                "countrycodes": "in",
+                "addressdetails": 0,
+            },
+        )
     if not isinstance(data, list):
         raise ProviderError("The place search service returned an invalid response.")
     results = []
@@ -128,9 +144,13 @@ async def reverse_place(client: httpx.AsyncClient, lat: float, lon: float) -> st
     cached = _cache_get(key)
     if cached is not None:
         return cached or None
-    data = await _nominatim_get(
-        client, "/reverse", {"lat": lat, "lon": lon, "format": "jsonv2", "addressdetails": 0}
-    )
+    async with _lock:
+        cached = _cache_get(key)
+        if cached is not None:
+            return cached or None
+        data = await _nominatim_get(
+            client, "/reverse", {"lat": lat, "lon": lon, "format": "jsonv2", "addressdetails": 0}
+        )
     if not isinstance(data, dict):
         raise ProviderError("The place search service returned an invalid response.")
     label = data.get("display_name")
@@ -146,22 +166,42 @@ def _onto(name: str | None, word: str = "onto") -> str:
     return f" {word} {name}" if name else ""
 
 
+_COMPASS = (
+    "north", "north-east", "east", "south-east", "south", "south-west", "west", "north-west",
+)  # fmt: skip
+
+
+def _compass(bearing: Any) -> str | None:
+    """8-point compass word for a bearing in degrees (0 = north, clockwise)."""
+    if isinstance(bearing, bool) or not isinstance(bearing, (int, float)) or not math.isfinite(bearing):
+        return None
+    return _COMPASS[round((bearing % 360) / 45) % 8]
+
+
 def build_instruction(
-    type_: str | None, modifier: str | None, name: str | None, exit_number: int | None = None
+    type_: str | None,
+    modifier: str | None,
+    name: str | None,
+    exit_number: Any = None,
+    bearing_after: Any = None,
 ) -> str:
-    """Human-readable English instruction for one OSRM maneuver (pure function)."""
+    """Human-readable English instruction for one OSRM maneuver (pure function).
+
+    OSRM's `depart` modifier is a turn direction relative to the previous leg, not a
+    heading, so departures are phrased from `bearing_after` instead.
+    """
     t = (type_ or "").lower()
     m = (modifier or "").lower() or None
     name = (name or "").strip() or None
     if t == "depart":
-        head = f"Head {m}" if m else "Head out"
-        return head + _onto(name, "on")
+        heading = _compass(bearing_after)
+        return (f"Head {heading}" if heading else "Head out") + _onto(name, "on")
     if t == "arrive":
         side = f", on the {m}" if m in ("left", "right") else ""
         return "You have arrived at your destination" + side
+    if m == "uturn":
+        return "Make a U-turn" + _onto(name)
     if t == "turn":
-        if m == "uturn":
-            return "Make a U-turn" + _onto(name)
         if m == "straight":
             return "Continue straight" + _onto(name)
         return ("Turn " + m if m else "Turn") + _onto(name)
@@ -170,12 +210,18 @@ def build_instruction(
     if t == "new name":
         return ("Continue " + m if m else "Continue") + _onto(name)
     if t in ("roundabout", "rotary", "roundabout turn"):
-        base = f"At the roundabout, take exit {exit_number}" if exit_number else "At the roundabout, continue"
+        valid_exit = isinstance(exit_number, int) and not isinstance(exit_number, bool) and exit_number > 0
+        if t == "roundabout turn" and m:
+            base = f"At the roundabout, turn {m}"
+        elif valid_exit:
+            base = f"At the roundabout, take exit {exit_number}"
+        else:
+            base = "At the roundabout, continue"
         return base + _onto(name)
     if t in ("exit roundabout", "exit rotary"):
         return "Exit the roundabout" + _onto(name)
     if t == "merge":
-        return ("Merge " + m if m else "Merge") + _onto(name)
+        return ("Merge " + m if m and m != "straight" else "Merge") + _onto(name)
     if t == "fork":
         return (f"Keep {m} at the fork" if m else "Keep to the fork") + _onto(name)
     if t == "end of road":
@@ -188,7 +234,7 @@ def build_instruction(
 
 
 def _num(value: Any) -> float:
-    if isinstance(value, bool) or not isinstance(value, (int, float)):
+    if isinstance(value, bool) or not isinstance(value, (int, float)) or not math.isfinite(value):
         raise ProviderError("The routing service returned an invalid response.")
     return value
 
@@ -200,6 +246,8 @@ def _parse_route(data: Any, mode: str) -> dict[str, Any]:
     code = data.get("code")
     if code == "NoRoute":
         raise NoRouteError()
+    if code == "NoSegment":
+        raise NoSegmentError()
     if code != "Ok" or not isinstance(data.get("routes"), list) or not data["routes"]:
         raise bad
     try:
@@ -217,7 +265,11 @@ def _parse_route(data: Any, mode: str) -> dict[str, Any]:
                 steps.append(
                     {
                         "instruction": build_instruction(
-                            man.get("type"), man.get("modifier"), name, man.get("exit")
+                            man.get("type"),
+                            man.get("modifier"),
+                            name,
+                            man.get("exit"),
+                            man.get("bearing_after"),
                         ),
                         "distance_m": _num(s["distance"]),
                         "duration_s": _num(s["duration"]),
@@ -264,6 +316,8 @@ async def fetch_route(
             body = None
         if isinstance(body, dict) and body.get("code") == "NoRoute":
             raise NoRouteError()
+        if isinstance(body, dict) and body.get("code") == "NoSegment":
+            raise NoSegmentError()
     if resp.status_code != 200:
         raise ProviderError("The routing service is unavailable right now.")
     try:

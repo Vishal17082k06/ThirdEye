@@ -18,6 +18,7 @@ async def lifespan(_: FastAPI) -> AsyncIterator[None]:
     check_jwt_secret(settings)
     Base.metadata.create_all(bind=engine)
     yield
+    await nav.close_http_client()
 
 
 app = FastAPI(title="Third Eye", lifespan=lifespan)

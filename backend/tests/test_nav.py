@@ -177,7 +177,13 @@ OSRM = {
                             "name": "Avinashi Road",
                             "distance": 700,
                             "duration": 500,
-                            "maneuver": {"type": "depart", "modifier": "left", "location": [76.95, 11.0]},
+                            "maneuver": {
+                                "type": "depart",
+                                "modifier": "right",
+                                "bearing_before": 0,
+                                "bearing_after": 47,
+                                "location": [76.95, 11.0],
+                            },
                         },
                         {
                             "name": "",
@@ -209,10 +215,10 @@ def test_route_ok_per_mode_url(client, h):
     assert body["provider"] == "OSRM (routing.openstreetmap.de)"
     assert body["geometry"]["coordinates"][0] == [76.95, 11.0]
     assert body["steps"][0] == {
-        "instruction": "Head left on Avinashi Road",
+        "instruction": "Head north-east on Avinashi Road",
         "distance_m": 700,
         "duration_s": 500,
-        "maneuver": {"type": "depart", "modifier": "left", "lat": 11.0, "lon": 76.95},
+        "maneuver": {"type": "depart", "modifier": "right", "lat": 11.0, "lon": 76.95},
         "name": "Avinashi Road",
     }
     assert body["steps"][1]["instruction"] == "You have arrived at your destination"
@@ -294,13 +300,18 @@ def test_route_timeout_502(client, h):
         ("continue", "straight", "NH 544", None, "Continue straight on NH 544"),
         ("continue", None, "", None, "Continue"),
         ("new name", "slight right", "C St", None, "Continue slight right onto C St"),
-        ("depart", None, "D Rd", None, "Head out on D Rd"),
-        ("depart", "north", "", None, "Head north"),
+        ("depart", "right", "", None, "Head out"),
         ("arrive", "left", "E St", None, "You have arrived at your destination, on the left"),
         ("arrive", None, "", None, "You have arrived at your destination"),
         ("roundabout", "right", "F Rd", 2, "At the roundabout, take exit 2 onto F Rd"),
         ("roundabout", "right", "", 3, "At the roundabout, take exit 3"),
         ("rotary", "left", "", None, "At the roundabout, continue"),
+        ("roundabout turn", "left", "R Rd", None, "At the roundabout, turn left onto R Rd"),
+        ("roundabout", "right", "", 0, "At the roundabout, continue"),
+        ("roundabout", "right", "", "2", "At the roundabout, continue"),
+        ("continue", "uturn", "X St", None, "Make a U-turn onto X St"),
+        ("merge", "straight", "H Hwy", None, "Merge onto H Hwy"),
+        ("merge", None, "", None, "Merge"),
         ("exit roundabout", "right", "G Rd", None, "Exit the roundabout onto G Rd"),
         ("merge", "left", "H Hwy", None, "Merge left onto H Hwy"),
         ("fork", "slight right", "", None, "Keep slight right at the fork"),
@@ -313,3 +324,85 @@ def test_route_timeout_502(client, h):
 )
 def test_build_instruction(type_, modifier, name, exit_, expected):
     assert build_instruction(type_, modifier, name, exit_) == expected
+
+
+@pytest.mark.parametrize(
+    "bearing,name,expected",
+    [
+        (0, "D Rd", "Head north on D Rd"),
+        (359, "", "Head north"),
+        (45, "A", "Head north-east on A"),
+        (90, "", "Head east"),
+        (135, "", "Head south-east"),
+        (180, "", "Head south"),
+        (225, "", "Head south-west"),
+        (270, "", "Head west"),
+        (315, "", "Head north-west"),
+        (None, "", "Head out"),
+        ("junk", "B", "Head out on B"),
+        (float("nan"), "", "Head out"),
+    ],
+)
+def test_depart_uses_bearing(bearing, name, expected):
+    assert build_instruction("depart", "right", name, None, bearing) == expected
+
+
+NO_SEGMENT = "No road or path found near one of these points"
+
+
+def test_no_segment_404_http_400(client, h):
+    fake(lambda req: httpx.Response(400, json={"code": "NoSegment", "message": "Could not find a matching segment"}))
+    r = client.get(ROUTE + "car", headers=h)
+    assert r.status_code == 404 and r.json()["detail"] == NO_SEGMENT
+
+
+def test_no_segment_404_http_200_body(client, h):
+    fake(lambda req: httpx.Response(200, json={"code": "NoSegment"}))
+    r = client.get(ROUTE + "foot", headers=h)
+    assert r.status_code == 404 and r.json()["detail"] == NO_SEGMENT
+
+
+def test_other_400_stays_502(client, h):
+    fake(lambda req: httpx.Response(400, json={"code": "InvalidQuery"}))
+    assert client.get(ROUTE + "car", headers=h).status_code == 502
+
+
+def test_provider_nan_is_502(client, h):
+    bad = (
+        b'{"code":"Ok","routes":[{"distance":NaN,"duration":1,'
+        b'"geometry":{"type":"LineString","coordinates":[]},"legs":[]}]}'
+    )
+    fake(lambda req: httpx.Response(200, content=bad))
+    assert client.get(ROUTE + "car", headers=h).status_code == 502
+
+
+def test_in_service_area_overflow():
+    from app.geo import in_service_area
+
+    assert not in_service_area(10**400, 76.9)
+
+
+def test_single_flight_identical_misses():
+    import asyncio
+
+    calls = []
+
+    async def handler(req):
+        calls.append(1)
+        await asyncio.sleep(0.05)
+        return httpx.Response(200, json=NOMINATIM)
+
+    async def run():
+        async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as c:
+            return await asyncio.gather(*(nav_service.search_places(c, "gandhipuram") for _ in range(3)))
+
+    out = asyncio.run(run())
+    assert out[0] == out[1] == out[2] and len(calls) == 1
+
+
+def test_client_config_and_user_agent():
+    from app.config import settings
+
+    assert nav.get_http_client().follow_redirects is False
+    assert settings.nominatim_user_agent.startswith("ThirdEye/1.0 (student project")
+    assert "contact email" in settings.nominatim_user_agent

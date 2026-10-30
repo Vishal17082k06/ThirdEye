@@ -20,7 +20,7 @@ def in_service_area(lat: float, lon: float) -> bool:
     """
     try:
         lat, lon = float(lat), float(lon)
-    except (TypeError, ValueError):
+    except (TypeError, ValueError, OverflowError):
         return False
     if not (math.isfinite(lat) and math.isfinite(lon)):
         return False

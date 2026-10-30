@@ -1,9 +1,22 @@
-import secrets
-from datetime import datetime, timezone
-from typing import Annotated, Literal
+"""Demo ride requests (no real provider, no driver assignment).
 
-from fastapi import APIRouter, Depends, HTTPException, Query, status
-from pydantic import BaseModel, Field
+Deliberate demo tradeoff: the server does NOT re-route at booking time. It cannot
+verify the client's route, so it only checks that the numbers are plausible: the
+distance must be within 0.9x..4x of the straight-line distance between the two
+points, the duration at most 24 h, and the implied average speed realistic for the
+mode. Fares are computed server-side from the (plausibility-checked) distance.
+
+Mode vocabulary: rides use walk|car|bike; /api/nav/route uses foot|car|bike
+(walk <-> foot). The frontend maps between them.
+"""
+
+import secrets
+from datetime import datetime, timedelta
+from typing import Annotated, Literal
+from zoneinfo import ZoneInfo
+
+from fastapi import APIRouter, Depends, HTTPException, Query, Response, status
+from pydantic import BaseModel, Field, StringConstraints
 from sqlalchemy import func, select, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
@@ -11,7 +24,7 @@ from sqlalchemy.orm import Session
 from app.config import settings
 from app.db import get_db
 from app.geo import RESTRICTION_MESSAGE, haversine_m, in_service_area
-from app.models import Ride, User
+from app.models import Ride, User, utcnow
 from app.schemas import UtcDatetime
 from app.security import get_current_user
 from app.services.events import record_event
@@ -25,7 +38,11 @@ DISCLAIMER = (
 FARE_NOTE = "Estimate using demo rates — not a real fare."
 MIN_SEPARATION_M = 50
 MIN_DISTANCE_RATIO = 0.9
-MAX_DISTANCE_RATIO = 10
+MAX_DISTANCE_RATIO = 4
+MAX_DURATION_S = 86_400
+MAX_SPEED_KMH = {"walk": 10, "bike": 40, "car": 130}
+DUPLICATE_WINDOW_S = 60
+BOOKING_TZ = ZoneInfo("Asia/Kolkata")  # booking IDs carry the local (Indian) date
 # No 0/O/1/I so an ID read aloud or off a screen cannot be confused.
 ID_ALPHABET = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789"
 
@@ -33,7 +50,7 @@ ID_ALPHABET = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789"
 class PointIn(BaseModel):
     lat: Annotated[float, Field(ge=-90, le=90, allow_inf_nan=False)]
     lon: Annotated[float, Field(ge=-180, le=180, allow_inf_nan=False)]
-    label: Annotated[str, Field(min_length=1, max_length=200)]
+    label: Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=200)]
 
 
 class RideCreate(BaseModel):
@@ -41,7 +58,7 @@ class RideCreate(BaseModel):
     destination: PointIn
     mode: Literal["car", "bike", "walk"]
     distance_m: Annotated[float, Field(gt=0, allow_inf_nan=False)]
-    duration_s: Annotated[float, Field(gt=0, allow_inf_nan=False)]
+    duration_s: Annotated[float, Field(gt=0, le=MAX_DURATION_S, allow_inf_nan=False)]
 
 
 class PointOut(BaseModel):
@@ -74,7 +91,7 @@ class RideList(BaseModel):
 
 def generate_booking_id() -> str:
     suffix = "".join(secrets.choice(ID_ALPHABET) for _ in range(4))
-    return f"TE-{datetime.now(timezone.utc):%Y%m%d}-{suffix}"
+    return f"TE-{datetime.now(BOOKING_TZ):%Y%m%d}-{suffix}"
 
 
 def calculate_fare(mode: str, distance_m: float) -> int | None:
@@ -118,15 +135,40 @@ def _validate(payload: RideCreate) -> None:
         raise _unprocessable("Pickup and destination must be at least 50 metres apart; choose different places.")
     if not (MIN_DISTANCE_RATIO * straight <= payload.distance_m <= MAX_DISTANCE_RATIO * straight):
         raise _unprocessable("distance does not match the route")
+    speed_kmh = payload.distance_m / payload.duration_s * 3.6
+    if speed_kmh > MAX_SPEED_KMH[payload.mode]:
+        raise _unprocessable(
+            f"duration is not realistic: the implied speed is too high for {payload.mode}"
+        )
 
 
 @router.post("", response_model=RideOut, status_code=status.HTTP_201_CREATED)
 def create_ride(
     payload: RideCreate,
+    response: Response,
     user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ) -> RideOut:
     _validate(payload)
+    # Idempotency guard against double-clicks/retries: an identical request that is
+    # still 'requested' and under a minute old returns that ride (200), not a new one.
+    duplicate = db.scalar(
+        select(Ride)
+        .where(
+            Ride.user_id == user.id,
+            Ride.status == "requested",
+            Ride.mode == payload.mode,
+            Ride.pickup_lat == payload.pickup.lat,
+            Ride.pickup_lon == payload.pickup.lon,
+            Ride.destination_lat == payload.destination.lat,
+            Ride.destination_lon == payload.destination.lon,
+            Ride.created_at >= utcnow() - timedelta(seconds=DUPLICATE_WINDOW_S),
+        )
+        .order_by(Ride.id.desc())
+    )
+    if duplicate is not None:
+        response.status_code = status.HTTP_200_OK
+        return to_out(duplicate)
     fare = calculate_fare(payload.mode, payload.distance_m)
     ride = None
     for _ in range(10):  # retry on the (very unlikely) booking-id collision

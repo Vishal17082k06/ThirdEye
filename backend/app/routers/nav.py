@@ -17,8 +17,16 @@ def get_http_client() -> httpx.AsyncClient:
     """Shared outgoing HTTP client; tests override this dependency with a fake."""
     global _client
     if _client is None:
-        _client = httpx.AsyncClient(follow_redirects=True)
+        _client = httpx.AsyncClient()
     return _client
+
+
+async def close_http_client() -> None:
+    """Called on app shutdown so the shared connection pool is released."""
+    global _client
+    if _client is not None:
+        await _client.aclose()
+        _client = None
 
 
 Coord = Annotated[float, Query(allow_inf_nan=False)]
@@ -84,6 +92,8 @@ async def route(
         raise _outside()
     try:
         return await nav_service.fetch_route(http, mode, from_lat, from_lon, to_lat, to_lon)
+    except nav_service.NoSegmentError as exc:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, nav_service.NO_SEGMENT) from exc
     except nav_service.NoRouteError as exc:
         msg = (
             nav_service.BIKE_UNAVAILABLE
