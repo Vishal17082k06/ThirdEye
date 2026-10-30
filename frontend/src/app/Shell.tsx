@@ -3,6 +3,9 @@ import { Outlet, useLocation } from 'react-router-dom'
 import { applyAccessibility } from '../lib/a11y'
 import { useEscapeLayer } from '../lib/escapeStack'
 import { toPrefs, useSettings } from '../lib/settings'
+import { SosProvider } from '../features/sos/SosProvider'
+import { NavigationBar } from '../features/navigation/NavigationBar'
+import { NavigationProvider } from '../features/navigation/NavigationProvider'
 import { Sidebar } from './Sidebar'
 import { Topbar } from './Topbar'
 
@@ -76,6 +79,8 @@ export function Shell() {
   }, [mobileOpen])
 
   return (
+    <SosProvider>
+    <NavigationProvider>
     <div className="flex min-h-screen bg-canvas">
       <a
         href="#main"
@@ -92,10 +97,13 @@ export function Shell() {
       {/* inert while the drawer is open: focus cannot escape behind it and assistive tech ignores the page. */}
       <div className="flex min-w-0 flex-1 flex-col" inert={mobileOpen}>
         <Topbar onOpenMobileNav={() => setMobileOpen(true)} mobileNavOpen={mobileOpen} menuButtonRef={menuButtonRef} />
+        <NavigationBar />
         <main id="main" ref={mainRef} tabIndex={-1} className="mx-auto w-full max-w-6xl flex-1 px-4 py-6 outline-none sm:px-6 lg:py-8">
           <Outlet />
         </main>
       </div>
     </div>
+    </NavigationProvider>
+    </SosProvider>
   )
 }

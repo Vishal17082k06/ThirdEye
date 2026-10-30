@@ -53,7 +53,7 @@ export const EMPTY_DASHBOARD: DashboardData = {
 const toItem = (e: ActivityEvent): ActivityItem => ({
   id: String(e.id),
   title: e.title,
-  detail: e.status && e.status !== 'ok' ? `Status: ${e.status}` : undefined,
+  detail: e.status === 'failed' ? 'Failed: this did not complete. Open Emergency SOS to retry or call your guardian.' : e.status && e.status !== 'ok' ? `Status: ${e.status}` : undefined,
   at: e.created_at,
   source: e.source,
 })
