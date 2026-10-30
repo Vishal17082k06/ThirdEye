@@ -1,6 +1,6 @@
 import { MapPin } from 'lucide-react'
-import { useState } from 'react'
-import { Button, Modal, Spinner } from '../../design'
+import { useEffect, useState } from 'react'
+import { Button, Modal } from '../../design'
 import type { SosFlow } from './SosProvider'
 import { locationText } from './location'
 import { SosResult } from './SosResult'
@@ -17,8 +17,15 @@ export function SosConfirmDialog({ flow }: { flow: SosFlow }) {
   const confirming = state.phase === 'confirming'
   const sending = state.phase === 'sending'
 
+  // The note is kept through a rejection or an unknown outcome so it can be sent again; cleared once a record exists.
+  useEffect(() => {
+    if (state.result) setNote('')
+  }, [state.result])
+
   function close() {
-    setNote('')
+    // Esc, overlay click and the X do nothing while a send is in flight with no outcome yet.
+    if (sending && !state.result) return
+    if (confirming) setNote('')
     flow.cancel()
   }
 
@@ -38,11 +45,7 @@ export function SosConfirmDialog({ flow }: { flow: SosFlow }) {
             <Button variant="secondary" className="min-h-14 text-lg" onClick={close}>
               Cancel
             </Button>
-            <Button variant="danger" className="min-h-14 text-lg" onClick={() => {
-                const n = note
-                setNote('')
-                void flow.confirm(n)
-              }}>
+            <Button variant="danger" className="min-h-14 text-lg" onClick={() => void flow.confirm(note)}>
               Send now
             </Button>
           </>
@@ -72,14 +75,15 @@ export function SosConfirmDialog({ flow }: { flow: SosFlow }) {
             </label>
           </>
         )}
-        {sending && !state.result && (
-          <p role="status" className="flex items-center gap-3 text-lg font-bold text-ink">
-            <Spinner size="md" label="" /> Sending your alert… Getting your location, then contacting the mail server.
-          </p>
-        )}
-        {(state.result || state.error || (sending && state.result)) && (
-          <SosResult record={state.result} error={state.error} busy={sending} guardianPhone={guardianPhone} onRetry={(id) => void flow.retry(id)} />
-        )}
+        <SosResult
+          record={state.result}
+          error={state.error}
+          busy={sending}
+          sending={sending && !state.result ? { startedAt: state.startedAt, waitingForLocation: state.waitingForLocation } : null}
+          guardianPhone={guardianPhone}
+          onRetry={(id) => void flow.retry(id)}
+          onSendAgain={() => void flow.sendAgain()}
+        />
       </div>
     </Modal>
   )

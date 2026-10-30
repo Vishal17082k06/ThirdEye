@@ -2,7 +2,7 @@ import { History as HistoryIcon, MapPinOff } from 'lucide-react'
 import { Badge, Button, Card, CardHeader, EmptyState, Spinner } from '../../design'
 import { absoluteTime, relativeTime } from '../../lib/relativeTime'
 import { ErrorBanner } from '../auth/FormBanner'
-import { useSosHistory, type SosRecord } from './api'
+import { safeMapsLink, useSosHistory, type SosRecord } from './api'
 
 function StatusBadge({ r }: { r: SosRecord }) {
   if (r.status === 'sent') return <Badge tone="success">Sent: accepted by mail server</Badge>
@@ -22,8 +22,8 @@ function Row({ r, onRetry, retrying }: { r: SosRecord; onRetry: (id: number) => 
       </div>
       <p className="text-base text-ink">{r.delivery_message}</p>
       <p className="flex flex-wrap items-center gap-x-4 gap-y-1 text-sm text-muted">
-        {r.maps_link ? (
-          <a href={r.maps_link} target="_blank" rel="noopener noreferrer" className="font-bold text-primary underline underline-offset-4">
+        {safeMapsLink(r.maps_link) ? (
+          <a href={safeMapsLink(r.maps_link) ?? undefined} target="_blank" rel="noopener noreferrer" className="font-bold text-primary underline underline-offset-4">
             Open in Google Maps
           </a>
         ) : (
@@ -46,7 +46,7 @@ function Row({ r, onRetry, retrying }: { r: SosRecord; onRetry: (id: number) => 
   )
 }
 
-export function SosHistory({ onRetry, retrying }: { onRetry: (id: number) => void; retrying: boolean }) {
+export function SosHistory({ onRetry, retryingId }: { onRetry: (id: number) => void; retryingId: number | null }) {
   const q = useSosHistory()
   const items = q.data?.items ?? []
   return (
@@ -68,7 +68,7 @@ export function SosHistory({ onRetry, retrying }: { onRetry: (id: number) => voi
       ) : (
         <ul className="divide-y divide-line">
           {items.map((r) => (
-            <Row key={r.id} r={r} onRetry={onRetry} retrying={retrying} />
+            <Row key={r.id} r={r} onRetry={onRetry} retrying={retryingId === r.id} />
           ))}
         </ul>
       )}

@@ -25,7 +25,6 @@ export function SosPage() {
   const canPress = !live || flow.ready
   const callHref = telHref(guardianPhone)
   const dialogOpen = state.open
-  const showResult = !dialogOpen && (state.result || state.error)
   const sending = state.phase === 'sending'
 
   return (
@@ -68,9 +67,15 @@ export function SosPage() {
 
         <div className="space-y-4">
           <div className="space-y-4">
-            {showResult && (
-              <SosResult record={state.result} error={state.error} busy={sending} guardianPhone={guardianPhone} onRetry={(id) => void flow.retry(id)} />
-            )}
+            <SosResult
+              record={dialogOpen ? null : state.result}
+              error={dialogOpen ? null : state.error}
+              busy={sending}
+              sending={!dialogOpen && sending && !state.result ? { startedAt: state.startedAt, waitingForLocation: state.waitingForLocation } : null}
+              guardianPhone={guardianPhone}
+              onRetry={(id) => void flow.retry(id)}
+              onSendAgain={() => void flow.sendAgain()}
+            />
           </div>
 
           {live && (
@@ -128,7 +133,7 @@ export function SosPage() {
         </div>
       </div>
 
-      {live && <SosHistory onRetry={(id) => void flow.retry(id)} retrying={sending} />}
+      {live && <SosHistory onRetry={(id) => void flow.retry(id)} retryingId={state.retryingId} />}
     </div>
   )
 }

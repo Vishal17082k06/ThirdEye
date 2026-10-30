@@ -14,7 +14,6 @@ import {
   postSos,
   retrySos,
   sosOneKey,
-  telHref,
   useSosStatus,
   type SosRecord,
   type SosRequestBody,
@@ -22,7 +21,10 @@ import {
 } from './api'
 
 /** How long confirm waits for a first GPS fix before sending without coordinates. */
-export const FIX_WAIT_MS = 4000
+export const FIX_WAIT_MS = 2000
+/** After an unknown outcome, look at the history again at these delays (ms) so a delayed send shows up. */
+export const UNKNOWN_REFETCH_MS = [0, 5000, 15000]
+const WARM_MS = 30_000
 
 export type SosPhase = 'idle' | 'confirming' | 'sending' | 'done'
 
@@ -32,9 +34,25 @@ export interface SosState {
   open: boolean
   /** The latest server record. Delivery wording always comes from it. */
   result: SosRecord | null
-  /** A request-level failure (no record exists): the alert was NOT sent. */
-  error: string | null
+  /** A request-level failure (no record exists). 'rejected' = the server refused it; 'unknown' = we cannot tell. */
+  error: SosError | null
+  /** When the current send started (ms), for the elapsed counter. */
+  startedAt: number | null
+  /** Waiting briefly for a first GPS fix before sending without one. */
+  waitingForLocation: boolean
+  /** The record being retried, so only its row shows a spinner. */
+  retryingId: number | null
 }
+
+export interface SosError {
+  kind: 'rejected' | 'unknown'
+  message: string
+  /** Set when the failed action was a retry of this record. */
+  retryId: number | null
+}
+
+export const UNKNOWN_MESSAGE =
+  'We could not confirm whether the alert was sent. Do not assume it was. Call your guardian now, and check SOS history below.'
 
 export interface SosFlow {
   state: SosState
@@ -52,8 +70,10 @@ export interface SosFlow {
   statusError: boolean
   guardian: Guardian | undefined
   guardianPhone: string | null
-  /** Opens the phone app for the guardian's number; false when there is none. */
-  callGuardian: () => boolean
+  /** Starts GPS early (shortcut hover/focus) for a short while. */
+  warmLocation: () => void
+  /** Repeat the last action after an unknown outcome (may send a duplicate). */
+  sendAgain: () => Promise<void>
   geo: { status: GeoStatus; position: GeoFix | null }
   /** The page asks for live GPS while it is mounted. */
   setLocationWanted: (wanted: boolean) => void
@@ -73,15 +93,19 @@ export function useSosFlow(): SosFlow {
   return ctx
 }
 
-const NOT_SENT = 'The alert was NOT sent. Call your guardian directly.'
-
-function describeFailure(err: unknown): string {
-  if (err instanceof ApiError) {
-    if (err.status === 0) return `Cannot reach the Third Eye server. ${NOT_SENT}`
-    return `${err.message} ${NOT_SENT}`
+/** 4xx is the server saying no (nothing was sent). Network failure, timeout/abort and 5xx are unknown. */
+function classify(err: unknown, retryId: number | null): SosError {
+  if (err instanceof ApiError && err.status >= 400 && err.status < 500) {
+    const message =
+      err.status === 409
+        ? 'The alert was not sent: it can no longer be retried; it may already be sending. The list has been refreshed.'
+        : `The alert was not sent: ${err.message}`
+    return { kind: 'rejected', message, retryId }
   }
-  return `Something went wrong. ${NOT_SENT}`
+  return { kind: 'unknown', message: UNKNOWN_MESSAGE, retryId }
 }
+
+const IDLE: SosState = { phase: 'idle', open: false, result: null, error: null, startedAt: null, waitingForLocation: false, retryingId: null }
 
 export function SosProvider({ children }: { children: ReactNode }) {
   const { mode } = useMode()
@@ -91,13 +115,17 @@ export function SosProvider({ children }: { children: ReactNode }) {
   const statusQ = useSosStatus(live)
   const guardianQ = useQuery({ queryKey: GUARDIAN_KEY, queryFn: () => api.get<Guardian>('/guardian'), enabled: live })
 
-  const [state, setState] = useState<SosState>({ phase: 'idle', open: false, result: null, error: null })
+  const [state, setState] = useState<SosState>(IDLE)
   const [dryRun, setDryRun] = useState(false)
   const [wanted, setWanted] = useState(false)
+  const [warm, setWarm] = useState(false)
+  const warmTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const timers = useRef<Array<ReturnType<typeof setTimeout>>>([])
+  const lastNote = useRef('')
   const busy = useRef(false)
 
   // GPS is only read in Live mode, and only while the page or the dialog needs it.
-  const geo = useGeolocation(live && (wanted || state.open))
+  const geo = useGeolocation(live && (wanted || warm || state.open))
   const posRef = useRef<GeoFix | null>(null)
   const geoStatusRef = useRef<GeoStatus>('idle')
   useEffect(() => {
@@ -119,9 +147,30 @@ export function SosProvider({ children }: { children: ReactNode }) {
     return posRef.current
   }, [])
 
+  const warmLocation = useCallback(() => {
+    setWarm(true)
+    if (warmTimer.current) clearTimeout(warmTimer.current)
+    warmTimer.current = setTimeout(() => setWarm(false), WARM_MS)
+  }, [])
+
+  // A delayed send must still show up: look at the history now and again a little later.
+  const refetchSoon = useCallback(() => {
+    for (const ms of UNKNOWN_REFETCH_MS) {
+      if (ms === 0) void qc.invalidateQueries({ queryKey: SOS_LIST_KEY })
+      else timers.current.push(setTimeout(() => void qc.invalidateQueries({ queryKey: SOS_LIST_KEY }), ms))
+    }
+  }, [qc])
+  useEffect(
+    () => () => {
+      timers.current.forEach(clearTimeout)
+      if (warmTimer.current) clearTimeout(warmTimer.current)
+    },
+    [],
+  )
+
   const apply = useCallback(
     (rec: SosRecord) => {
-      setState((s) => ({ ...s, result: rec, error: null, phase: rec.status === 'pending' && !rec.retry_available ? 'sending' : 'done' }))
+      setState((s) => ({ ...s, result: rec, error: null, startedAt: null, waitingForLocation: false, retryingId: null, phase: rec.status === 'pending' && !rec.retry_available ? 'sending' : 'done' }))
       void qc.invalidateQueries({ queryKey: SOS_LIST_KEY })
     },
     [qc],
@@ -140,16 +189,19 @@ export function SosProvider({ children }: { children: ReactNode }) {
       setState((s) => ({ ...s, open: true }))
       return
     }
-    setState({ phase: 'confirming', open: true, result: null, error: null })
+    setState({ ...IDLE, phase: 'confirming', open: true })
   }, [live, ready, navigate])
 
   const confirm = useCallback(
     async (note?: string) => {
       if (busy.current) return
       busy.current = true
-      setState((s) => ({ ...s, phase: 'sending', result: null, error: null }))
+      lastNote.current = note ?? ''
+      const needsWait = !posRef.current && geoStatusRef.current !== 'denied' && geoStatusRef.current !== 'unavailable'
+      setState((s) => ({ ...s, phase: 'sending', result: null, error: null, startedAt: Date.now(), waitingForLocation: needsWait, retryingId: null }))
       try {
         const fix = await freshestFix()
+        setState((s) => ({ ...s, waitingForLocation: false }))
         const body: SosRequestBody = {}
         if (fix) {
           body.lat = fix.lat
@@ -160,40 +212,40 @@ export function SosProvider({ children }: { children: ReactNode }) {
         if (text) body.note = text.slice(0, 300)
         apply(await postSos(body))
       } catch (err) {
-        setState((s) => ({ ...s, phase: 'done', result: null, error: describeFailure(err) }))
+        const e = classify(err, null)
+        if (e.kind === 'unknown') refetchSoon()
+        setState((s) => ({ ...s, phase: 'done', result: null, error: e, startedAt: null, waitingForLocation: false }))
       } finally {
         busy.current = false
       }
     },
-    [apply, freshestFix],
+    [apply, freshestFix, refetchSoon],
   )
 
   const retry = useCallback(
     async (id: number) => {
       if (busy.current) return
       busy.current = true
-      setState((s) => ({ ...s, phase: 'sending', error: null }))
+      setState((s) => ({ ...s, phase: 'sending', error: null, startedAt: Date.now(), retryingId: id }))
       try {
         apply(await retrySos(id))
       } catch (err) {
         void qc.invalidateQueries({ queryKey: SOS_LIST_KEY })
-        const msg =
-          err instanceof ApiError && err.status === 409
-            ? 'This alert can no longer be retried; it may already be sending. The list has been refreshed.'
-            : describeFailure(err)
-        setState((s) => ({ ...s, phase: 'done', error: msg }))
+        const e = classify(err, id)
+        if (e.kind === 'unknown') refetchSoon()
+        setState((s) => ({ ...s, phase: 'done', error: e, startedAt: null, retryingId: null }))
       } finally {
         busy.current = false
       }
     },
-    [apply, qc],
+    [apply, qc, refetchSoon],
   )
 
   const cancel = useCallback(() => {
-    setState((s) => (s.phase === 'confirming' ? { phase: 'idle', open: false, result: null, error: null } : { ...s, open: false }))
+    setState((s) => (s.phase === 'confirming' ? IDLE : s.phase === 'sending' && !s.result ? s : { ...s, open: false }))
   }, [])
 
-  const dismissResult = useCallback(() => setState({ phase: 'idle', open: false, result: null, error: null }), [])
+  const dismissResult = useCallback(() => setState(IDLE), [])
 
   // While the result is pending the server may finish it; follow it until it settles.
   const pendingId = state.result?.status === 'pending' ? state.result.id : null
@@ -208,12 +260,11 @@ export function SosProvider({ children }: { children: ReactNode }) {
     if (follow.data && follow.data.id === pendingId && follow.data.status !== 'pending') apply(follow.data)
   }, [follow.data, pendingId, apply])
 
-  const callGuardian = useCallback(() => {
-    const href = telHref(guardianPhone)
-    if (!href) return false
-    window.location.href = href
-    return true
-  }, [guardianPhone])
+  const sendAgain = useCallback(async () => {
+    const id = state.error?.retryId
+    if (id != null) await retry(id)
+    else await confirm(lastNote.current)
+  }, [state.error, retry, confirm])
 
   const value = useMemo<SosFlow>(
     () => ({
@@ -229,12 +280,13 @@ export function SosProvider({ children }: { children: ReactNode }) {
       statusError: live && statusQ.isError,
       guardian: guardianQ.data,
       guardianPhone,
-      callGuardian,
+      warmLocation,
+      sendAgain,
       geo: { status: geo.status, position: geo.position },
       setLocationWanted: setWanted,
       dismissResult,
     }),
-    [state, requestSend, confirm, cancel, retry, ready, live, statusQ.data, statusQ.isPending, statusQ.isError, guardianQ.data, guardianPhone, callGuardian, geo.status, geo.position, dismissResult],
+    [state, requestSend, confirm, cancel, retry, ready, live, statusQ.data, statusQ.isPending, statusQ.isError, guardianQ.data, guardianPhone, warmLocation, sendAgain, geo.status, geo.position, dismissResult],
   )
 
   return (

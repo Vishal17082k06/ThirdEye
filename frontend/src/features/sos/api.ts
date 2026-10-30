@@ -48,8 +48,26 @@ export const sosOneKey = (id: number) => ['sos', 'one', id] as const
 
 export const POLL_MS = 3000
 
-export const postSos = (body: SosRequestBody) => api.post<SosRecord>('/sos', body)
-export const retrySos = (id: number) => api.post<SosRecord>(`/sos/${id}/retry`)
+/** The backend may spend up to ~40 s talking to the mail server; past this we stop waiting and say the outcome is unknown. */
+export const SOS_TIMEOUT_MS = 60_000
+
+async function postWithTimeout<T>(path: string, body?: unknown): Promise<T> {
+  const ctrl = new AbortController()
+  const timer = setTimeout(() => ctrl.abort(), SOS_TIMEOUT_MS)
+  try {
+    return await api.post<T>(path, body, { signal: ctrl.signal })
+  } finally {
+    clearTimeout(timer)
+  }
+}
+
+export const postSos = (body: SosRequestBody) => postWithTimeout<SosRecord>('/sos', body)
+export const retrySos = (id: number) => postWithTimeout<SosRecord>(`/sos/${id}/retry`)
+
+/** Only ever render a Google Maps link the server built; anything else is treated as "no link". */
+export function safeMapsLink(link: string | null | undefined): string | null {
+  return link && link.startsWith('https://www.google.com/maps') ? link : null
+}
 export const fetchSos = (id: number) => api.get<SosRecord>(`/sos/${id}`)
 
 export function useSosStatus(enabled = true) {

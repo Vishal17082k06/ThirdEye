@@ -38,6 +38,8 @@ export function Topbar({ onOpenMobileNav, mobileNavOpen, menuButtonRef }: Topbar
         <NotificationBell />
         <Link
           to="/sos"
+          onMouseEnter={() => sos?.warmLocation()}
+          onFocus={() => sos?.warmLocation()}
           onClick={(e) => {
             // Live mode with a guardian: open the confirmation straight away. Otherwise the link goes to /sos,
             // where the page explains what is missing (or, in Simulation, runs the practice alert).

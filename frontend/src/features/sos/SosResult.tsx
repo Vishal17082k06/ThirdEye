@@ -1,13 +1,18 @@
 import { AlertCircle, CheckCircle2, Phone, RotateCcw } from 'lucide-react'
 import { Button, Spinner, buttonClasses } from '../../design'
 import { cn } from '../../lib/cn'
+import { useEffect, useState } from 'react'
 import { telHref, type SosRecord } from './api'
+import type { SosError } from './SosProvider'
 
 interface SosResultProps {
   record: SosRecord | null
   /** Set when the request itself failed, so no record exists. */
-  error: string | null
+  error: SosError | null
   busy: boolean
+  /** A request is in flight and no record has come back yet. */
+  sending: { startedAt: number | null; waitingForLocation: boolean } | null
+  onSendAgain: () => void
   guardianPhone: string | null
   onRetry: (id: number) => void
 }
@@ -32,18 +37,45 @@ function CallLink({ phone }: { phone: string | null }) {
  * The honest outcome of an alert. Success wording is only ever produced for a server status of 'sent'.
  * The live region stays mounted so a screen reader announces each change.
  */
-export function SosResult({ record, error, busy, guardianPhone, onRetry }: SosResultProps) {
+function Elapsed({ since }: { since: number | null }) {
+  const [now, setNow] = useState(() => Date.now())
+  useEffect(() => {
+    const t = setInterval(() => setNow(Date.now()), 1000)
+    return () => clearInterval(t)
+  }, [])
+  return <span>{since ? Math.max(0, Math.floor((now - since) / 1000)) : 0} s</span>
+}
+
+export function SosResult({ record, error, busy, sending, guardianPhone, onRetry, onSendAgain }: SosResultProps) {
   let body = null
   if (error) {
+    const unknown = error.kind === 'unknown'
     body = (
-      <div className="bw space-y-3 rounded-2xl border-danger bg-danger-soft p-5 text-danger">
+      <div role="alert" className="bw space-y-3 rounded-2xl border-danger bg-danger-soft p-5 text-danger">
         <p className="flex items-start gap-3 text-lg font-bold">
           <AlertCircle className="mt-0.5 h-6 w-6 shrink-0" aria-hidden="true" />
-          <span>Alert not sent. {error}</span>
+          <span>{error.message}</span>
         </p>
         <div className="flex flex-col gap-3 sm:flex-row">
           <CallLink phone={guardianPhone} />
+          {unknown && (
+            <Button variant="secondary" className="min-h-14 text-lg" loading={busy} onClick={onSendAgain}>
+              Send again (may send a duplicate)
+            </Button>
+          )}
         </div>
+      </div>
+    )
+  } else if (!record && sending) {
+    body = (
+      <div className="bw space-y-2 rounded-2xl border-warning bg-warning-soft p-5 text-warning">
+        <p className="flex items-center gap-3 text-lg font-bold">
+          <Spinner size="sm" label="" />
+          <span>{sending.waitingForLocation ? 'Sending without location in a moment…' : 'Sending…'}</span>
+        </p>
+        <p className="font-semibold">
+          Elapsed <Elapsed since={sending.startedAt} />. This can take up to a minute.
+        </p>
       </div>
     )
   } else if (record?.status === 'sent') {
@@ -61,7 +93,7 @@ export function SosResult({ record, error, busy, guardianPhone, onRetry }: SosRe
     )
   } else if (record?.status === 'failed') {
     body = (
-      <div className="bw space-y-3 rounded-2xl border-danger bg-danger-soft p-5 text-danger">
+      <div role="alert" className="bw space-y-3 rounded-2xl border-danger bg-danger-soft p-5 text-danger">
         <p className="flex items-start gap-3 text-lg font-bold">
           <AlertCircle className="mt-0.5 h-6 w-6 shrink-0" aria-hidden="true" />
           <span>Alert NOT delivered. {record.delivery_message}</span>
@@ -97,7 +129,7 @@ export function SosResult({ record, error, busy, guardianPhone, onRetry }: SosRe
     )
   }
   return (
-    <div aria-live="polite" aria-atomic="true" data-testid="sos-result">
+    <div role="status" aria-live="polite" aria-atomic="true" data-testid="sos-result">
       {body}
     </div>
   )
