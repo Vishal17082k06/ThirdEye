@@ -1,5 +1,5 @@
 import { useQuery } from '@tanstack/react-query'
-import { useEffect, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { api, ApiError } from '../../lib/api'
 import {
   DEFAULT_BOUNDS,
@@ -66,7 +66,11 @@ export function useServiceArea(): ServiceArea {
     staleTime: 60 * 60 * 1000,
     retry: 1,
   })
-  return q.data ? { bounds: q.data.bounds, centre: q.data.centre, message: q.data.message || SERVICE_AREA_MESSAGE } : FALLBACK_AREA
+  const data = q.data
+  return useMemo(
+    () => (data ? { bounds: data.bounds, centre: data.centre, message: data.message || SERVICE_AREA_MESSAGE } : FALLBACK_AREA),
+    [data],
+  )
 }
 
 export async function reverseGeocode(lat: number, lon: number, signal?: AbortSignal): Promise<string> {
