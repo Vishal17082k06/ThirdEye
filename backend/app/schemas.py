@@ -296,3 +296,52 @@ class NotificationOut(BaseModel):
 class NotificationList(BaseModel):
     items: list[NotificationOut]
     unread_count: int
+
+
+# ---------- devices ----------
+
+DEVICE_STATUSES = ("connected", "disconnected", "not_integrated", "unknown", "error")
+
+
+class DeviceOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    key: str
+    name: str
+    status: str
+    last_seen: UtcDatetime | None
+    config: dict[str, Any]
+    error: str | None
+
+
+class DeviceList(BaseModel):
+    items: list[DeviceOut]
+
+
+class DeviceConfigUpdate(BaseModel):
+    # extra="forbid": a body carrying "status" is rejected, never silently applied.
+    model_config = ConfigDict(extra="forbid")
+
+    config: dict[str, Any]
+
+
+class DeviceReport(BaseModel):
+    """What the browser reports about the laptop camera."""
+
+    status: Literal["connected", "disconnected", "error"]
+    error: Annotated[str, Field(max_length=500)] | None = None
+
+
+class DeviceHeartbeat(BaseModel):
+    source: str
+    info: dict[str, Any] = {}
+
+    @field_validator("source")
+    @classmethod
+    def only_hardware(cls, value: str) -> str:
+        if value != "hardware":
+            raise ValueError(
+                "Only source='hardware' heartbeats can mark a device connected; "
+                "simulation and live sources are rejected"
+            )
+        return value
