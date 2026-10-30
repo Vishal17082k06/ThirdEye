@@ -1,8 +1,9 @@
-import { Bot, Car, Navigation, ShieldAlert } from 'lucide-react'
+import { Car, Navigation, ShieldAlert } from 'lucide-react'
 import { Navigate, Route, Routes } from 'react-router-dom'
 import { ForgotPassword } from '../features/auth/ForgotPassword'
 import { Login } from '../features/auth/Login'
 import { Register } from '../features/auth/Register'
+import { AiAssistance } from '../features/ai/AiAssistance'
 import { Dashboard } from '../features/dashboard/Dashboard'
 import { Profile } from '../features/profile/Profile'
 import { Settings as SettingsPage } from '../features/settings/Settings'
@@ -29,7 +30,7 @@ export function AppRoutes() {
 
           <Route element={<Shell />}>
             <Route path="/dashboard" element={<Dashboard />} />
-        <Route path="/ai" element={<PagePlaceholder title="AI Assistance" holds="live camera or image analysis with obstacle detection and spoken announcements" icon={Bot} />} />
+        <Route path="/ai" element={<AiAssistance />} />
         <Route path="/navigation" element={<PagePlaceholder title="Navigation" holds="a Coimbatore map with search, routes, and turn-by-turn steps" icon={Navigation} />} />
         <Route path="/rides" element={<PagePlaceholder title="Book a Ride" holds="ride requests with fare estimates and ride history" icon={Car} />} />
         <Route path="/devices" element={<Devices />} />
