@@ -115,6 +115,8 @@ class Ride(Base):
     fare_estimate: Mapped[float | None] = mapped_column(Float, nullable=True)
     status: Mapped[str] = mapped_column(String(30))
     created_at: Mapped[datetime] = _created_at()
+    # Added later via add_missing_columns(); NULL (older rows) means 'live'.
+    source: Mapped[str | None] = mapped_column(String(20), nullable=True)
 
 
 class SosEvent(Base):

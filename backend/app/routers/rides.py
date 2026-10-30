@@ -59,6 +59,8 @@ class RideCreate(BaseModel):
     mode: Literal["car", "bike", "walk"]
     distance_m: Annotated[float, Field(gt=0, allow_inf_nan=False)]
     duration_s: Annotated[float, Field(gt=0, le=MAX_DURATION_S, allow_inf_nan=False)]
+    # Simulation-mode requests must never show up as Live history; hardware is not allowed.
+    source: Literal["live", "simulation"] = "live"
 
 
 class PointOut(BaseModel):
@@ -78,6 +80,7 @@ class RideOut(BaseModel):
     fare_estimate: int | None
     fare_note: str | None
     status: str
+    source: str
     created_at: UtcDatetime
     disclaimer: str = DISCLAIMER
 
@@ -116,6 +119,7 @@ def to_out(ride: Ride) -> RideOut:
         fare_estimate=None if ride.fare_estimate is None else round(ride.fare_estimate),
         fare_note=None if ride.fare_estimate is None else FARE_NOTE,
         status=ride.status,
+        source=ride.source or "live",
         created_at=ride.created_at,
     )
 
@@ -158,6 +162,7 @@ def create_ride(
             Ride.user_id == user.id,
             Ride.status == "requested",
             Ride.mode == payload.mode,
+            func.coalesce(Ride.source, "live") == payload.source,
             Ride.pickup_lat == payload.pickup.lat,
             Ride.pickup_lon == payload.pickup.lon,
             Ride.destination_lat == payload.destination.lat,
@@ -186,6 +191,7 @@ def create_ride(
             duration_s=payload.duration_s,
             fare_estimate=fare,
             status="requested",
+            source=payload.source,
         )
         db.add(ride)
         try:
@@ -201,7 +207,7 @@ def create_ride(
         user.id,
         "ride",
         f"Ride requested {ride.booking_id}: {ride.pickup_label} to {ride.destination_label}",
-        source="live",
+        source=ride.source,
         details={"booking_id": ride.booking_id, "mode": ride.mode, "distance_m": ride.distance_m},
         status="requested",
         notify={
@@ -263,7 +269,7 @@ def cancel_ride(
         user.id,
         "ride",
         f"Ride request {ride.booking_id} cancelled",
-        source="live",
+        source=ride.source or "live",
         details={"booking_id": ride.booking_id},
         status="cancelled",
         notify={

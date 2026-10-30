@@ -44,7 +44,7 @@ def test_create_shape(client, h):
     d = r.json()
     assert set(d) == {
         "id", "booking_id", "pickup", "destination", "mode", "distance_m", "duration_s",
-        "fare_estimate", "fare_note", "status", "created_at", "disclaimer",
+        "fare_estimate", "fare_note", "status", "source", "created_at", "disclaimer",
     }  # fmt: skip
     assert d["status"] == "requested" and d["mode"] == "car"
     assert d["pickup"] == PICKUP and d["destination"] == DEST
@@ -284,3 +284,45 @@ def test_duplicate_after_cancel_is_new(client, h):
     first = book(client, h).json()
     client.post(f"/api/rides/{first['id']}/cancel", headers=h)
     assert book(client, h).status_code == 201
+
+
+def test_default_source_live(client, h):
+    assert book(client, h).json()["source"] == "live"
+    assert book(client, h, source="live", mode="bike").json()["source"] == "live"
+
+
+def test_hardware_source_rejected(client, h):
+    assert book(client, h, source="hardware").status_code == 422
+    assert book(client, h, source="bogus").status_code == 422
+
+
+def test_simulation_source_flows_to_events_and_notifications(client, h):
+    ride = book(client, h, source="simulation").json()
+    assert ride["source"] == "simulation"
+    client.post(f"/api/rides/{ride['id']}/cancel", headers=h)  # cancel reuses the ride source
+    assert client.get(f"/api/rides/{ride['id']}", headers=h).json()["source"] == "simulation"
+    events = client.get("/api/events?type=ride", headers=h).json()["items"]
+    assert len(events) == 2 and all(e["source"] == "simulation" for e in events)
+    notes = client.get("/api/notifications", headers=h).json()["items"]
+    assert len(notes) == 2 and all(n["source"] == "simulation" for n in notes)
+    assert client.get("/api/events?type=ride&source=live", headers=h).json()["total"] == 0
+
+
+def test_null_source_row_reads_as_live(client, h):
+    from app.models import Ride
+
+    rid = book(client, h).json()["id"]
+    with client.session_factory() as db:
+        db.get(Ride, rid).source = None
+        db.commit()
+    assert client.get(f"/api/rides/{rid}", headers=h).json()["source"] == "live"
+    client.post(f"/api/rides/{rid}/cancel", headers=h)
+    assert client.get("/api/events?type=ride", headers=h).json()["items"][0]["source"] == "live"
+
+
+def test_idempotency_includes_source(client, h):
+    a = book(client, h, source="simulation")
+    b = book(client, h, source="live")
+    c = book(client, h, source="simulation")
+    assert (a.status_code, b.status_code, c.status_code) == (201, 201, 200)
+    assert a.json()["id"] == c.json()["id"] != b.json()["id"]
