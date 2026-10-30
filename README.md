@@ -39,6 +39,17 @@ npm install
 npm run dev                 # http://localhost:5173, /api is proxied to :8000
 ```
 
+## Enabling SOS emails
+
+The Emergency SOS feature emails the guardian through Gmail SMTP (`smtp.gmail.com:465`, SSL).
+
+1. Turn on 2-Step Verification for the sending Google account.
+2. Create an App Password at https://myaccount.google.com/apppasswords (a 16-character code; your normal password will not work).
+3. In `backend/.env` set `GMAIL_USER=you@gmail.com` and `GMAIL_APP_PASSWORD=<the 16 characters>`, then restart the backend.
+4. Add a guardian with a valid email in the Profile page.
+
+Without these, SOS attempts are stored as `failed` ("Email service is not configured on the server.") and can be retried once configured. A SOS is marked `sent` only when Gmail's server accepts the message; that confirms hand-off, not that the guardian read it. Dev databases created before SOS gained its extra columns are upgraded automatically at startup.
+
 ## Tests
 
 ```powershell

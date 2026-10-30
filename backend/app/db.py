@@ -1,6 +1,6 @@
 from collections.abc import Iterator
 
-from sqlalchemy import create_engine
+from sqlalchemy import Engine, create_engine, inspect, text
 from sqlalchemy.orm import DeclarativeBase, Session, sessionmaker
 
 from app.config import settings
@@ -22,3 +22,20 @@ def get_db() -> Iterator[Session]:
         yield db
     finally:
         db.close()
+
+
+def add_missing_columns(bind: Engine) -> None:
+    """Tiny stand-in for migrations: ALTER TABLE ... ADD COLUMN for nullable columns
+    that a model declares but an older database file lacks. create_all() only creates
+    missing tables, never missing columns. Only nullable columns are added (always safe)."""
+    inspector = inspect(bind)
+    with bind.begin() as conn:
+        for table in Base.metadata.sorted_tables:
+            if not inspector.has_table(table.name):
+                continue
+            existing = {c["name"] for c in inspector.get_columns(table.name)}
+            for column in table.columns:
+                if column.name in existing or not column.nullable:
+                    continue
+                ddl_type = column.type.compile(dialect=bind.dialect)
+                conn.execute(text(f'ALTER TABLE "{table.name}" ADD COLUMN "{column.name}" {ddl_type}'))

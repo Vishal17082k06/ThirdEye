@@ -130,3 +130,8 @@ class SosEvent(Base):
     error: Mapped[str | None] = mapped_column(Text, nullable=True)
     guardian_email: Mapped[str] = mapped_column(String(254))
     attempts: Mapped[int] = mapped_column(Integer, default=0)
+    # Added after the first release: existing dev DBs get these via add_missing_columns().
+    accuracy_m: Mapped[float | None] = mapped_column(Float, nullable=True)
+    note: Mapped[str | None] = mapped_column(String(300), nullable=True)
+    guardian_name: Mapped[str | None] = mapped_column(String(120), nullable=True)
+    sent_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
