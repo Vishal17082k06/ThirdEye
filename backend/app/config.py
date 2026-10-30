@@ -26,6 +26,11 @@ class Settings(BaseSettings):
     gmail_user: str = ""
     gmail_app_password: str = ""
     openai_api_key: str = ""
+    nominatim_user_agent: str = "ThirdEye/1.0 (student project)"
+    # Demo ride fare rates (INR); not real prices.
+    ride_base_fare_inr: float = 30
+    ride_per_km_car: float = 14
+    ride_per_km_bike: float = 8
 
     @field_validator("jwt_secret", mode="before")
     @classmethod
