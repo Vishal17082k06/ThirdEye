@@ -145,3 +145,17 @@
 .bw {
   border-width: var(--border-w);
 }
+
+/* Map pins are Leaflet divIcons: no default box, and a crosshair while a map click is expected. */
+.te-pin {
+  background: transparent;
+  border: 0;
+}
+.te-picking .leaflet-container,
+.te-picking .leaflet-container .leaflet-grab,
+.te-picking .leaflet-container .leaflet-interactive {
+  cursor: crosshair;
+}
+.leaflet-container {
+  font-family: inherit;
+}

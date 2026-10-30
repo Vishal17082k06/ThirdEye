@@ -39,7 +39,7 @@ export function setUnauthorizedHandler(fn: UnauthorizedHandler | null): void {
 // Credential endpoints legitimately return 401 ("wrong password"); that is not an expired session.
 const SKIP_UNAUTHORIZED = ['/auth/login', '/auth/register', '/auth/forgot-password']
 
-async function request<T>(method: string, path: string, body?: unknown): Promise<T> {
+async function request<T>(method: string, path: string, body?: unknown, signal?: AbortSignal): Promise<T> {
   const headers: Record<string, string> = { Accept: 'application/json' }
   const token = getToken()
   if (token) headers.Authorization = `Bearer ${token}`
@@ -51,8 +51,11 @@ async function request<T>(method: string, path: string, body?: unknown): Promise
       method,
       headers,
       body: body === undefined ? undefined : JSON.stringify(body),
+      signal,
     })
-  } catch {
+  } catch (err) {
+    // A caller that cancelled on purpose (stale search, unmounted page) must be able to tell it apart from a network failure.
+    if (signal?.aborted) throw err
     throw new ApiError(0, 'Cannot reach the Third Eye server. Check your connection and try again.')
   }
 
@@ -75,7 +78,7 @@ async function request<T>(method: string, path: string, body?: unknown): Promise
 }
 
 export const api = {
-  get: <T>(path: string) => request<T>('GET', path),
+  get: <T>(path: string, opts?: { signal?: AbortSignal }) => request<T>('GET', path, undefined, opts?.signal),
   post: <T>(path: string, body?: unknown) => request<T>('POST', path, body),
   put: <T>(path: string, body?: unknown) => request<T>('PUT', path, body),
   delete: <T>(path: string) => request<T>('DELETE', path),
