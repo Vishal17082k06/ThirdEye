@@ -1,4 +1,3 @@
-import { ShieldAlert } from 'lucide-react'
 import { Navigate, Route, Routes } from 'react-router-dom'
 import { ForgotPassword } from '../features/auth/ForgotPassword'
 import { Login } from '../features/auth/Login'
@@ -6,13 +5,13 @@ import { Register } from '../features/auth/Register'
 import { AiAssistance } from '../features/ai/AiAssistance'
 import { NavigationPage } from '../features/navigation/NavigationPage'
 import { RidesPage } from '../features/rides/RidesPage'
+import { SosPage } from '../features/sos/SosPage'
 import { Dashboard } from '../features/dashboard/Dashboard'
 import { Profile } from '../features/profile/Profile'
 import { Settings as SettingsPage } from '../features/settings/Settings'
 import { Devices } from '../features/devices/Devices'
 import { History } from '../features/history/History'
 import { PortalSelect } from '../features/portal/PortalSelect'
-import { PagePlaceholder } from './PagePlaceholder'
 import { ProtectedRoute, PublicOnlyRoute } from './ProtectedRoute'
 import { Shell } from './Shell'
 
@@ -37,7 +36,7 @@ export function AppRoutes() {
         <Route path="/rides" element={<RidesPage />} />
         <Route path="/devices" element={<Devices />} />
         <Route path="/history" element={<History />} />
-        <Route path="/sos" element={<PagePlaceholder title="Emergency SOS" holds="the SOS trigger, guardian alerts, and SOS history" icon={ShieldAlert} />} />
+        <Route path="/sos" element={<SosPage />} />
         <Route path="/profile" element={<Profile />} />
         <Route path="/settings" element={<SettingsPage />} />
           </Route>
