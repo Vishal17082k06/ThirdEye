@@ -1,8 +1,25 @@
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
+import { useState } from 'react'
+import { BrowserRouter } from 'react-router-dom'
+import { AppRoutes } from './app/router'
+import { ToastProvider } from './design'
+import { AuthProvider } from './lib/auth'
+import { ModeProvider } from './lib/mode'
+
 function App() {
+  const [queryClient] = useState(() => new QueryClient({ defaultOptions: { queries: { retry: false } } }))
   return (
-    <main className="min-h-screen bg-slate-50 p-8 text-slate-900">
-      <h1 className="text-2xl font-bold text-blue-700">Third Eye</h1>
-    </main>
+    <QueryClientProvider client={queryClient}>
+      <BrowserRouter>
+        <ToastProvider>
+          <AuthProvider>
+            <ModeProvider>
+              <AppRoutes />
+            </ModeProvider>
+          </AuthProvider>
+        </ToastProvider>
+      </BrowserRouter>
+    </QueryClientProvider>
   )
 }
 

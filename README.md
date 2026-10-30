@@ -1,4 +1,4 @@
-﻿# ThirdEye
+# ThirdEye
 
 Third Eye: smart assistance system for visually impaired people (FastAPI backend + React/TypeScript/Vite/Tailwind frontend).
 

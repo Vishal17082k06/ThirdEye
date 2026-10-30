@@ -1,0 +1,27 @@
+import { render } from '@testing-library/react'
+import type { ReactElement } from 'react'
+import { MemoryRouter } from 'react-router-dom'
+import { ToastProvider } from './design'
+import { AuthProvider, type User } from './lib/auth'
+import { ModeProvider, type Mode } from './lib/mode'
+
+export const TEST_USER: User = { id: 1, name: 'Asha Raman', email: 'asha@example.com', phone: '+919876543210' }
+
+interface Options {
+  route?: string
+  user?: User | null
+  mode?: Mode | null
+}
+
+/** Renders with the same providers as the real app, but with a known user/mode and an in-memory router. */
+export function renderApp(ui: ReactElement, { route = '/', user = TEST_USER, mode = null }: Options = {}) {
+  return render(
+    <MemoryRouter initialEntries={[route]}>
+      <ToastProvider>
+        <AuthProvider initialUser={user}>
+          <ModeProvider initialMode={mode}>{ui}</ModeProvider>
+        </AuthProvider>
+      </ToastProvider>
+    </MemoryRouter>,
+  )
+}
