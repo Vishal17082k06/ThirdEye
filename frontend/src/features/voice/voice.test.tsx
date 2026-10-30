@@ -96,7 +96,7 @@ afterEach(() => {
 
 const openPanel = async (user: ReturnType<typeof userEvent.setup>) => {
   await user.click(screen.getByRole('button', { name: 'Voice assistant' }))
-  return screen.getByRole('dialog', { name: 'Voice assistant' })
+  return screen.getByRole('region', { name: 'Voice assistant' })
 }
 
 const typeCommand = async (user: ReturnType<typeof userEvent.setup>, panel: HTMLElement, text: string) => {
@@ -171,7 +171,7 @@ describe('voice assistant UI', () => {
     install()
     setup()
     fireEvent.keyDown(document, { code: 'KeyV', key: 'V', altKey: true, shiftKey: true })
-    const panel = await screen.findByRole('dialog', { name: 'Voice assistant' })
+    const panel = await screen.findByRole('region', { name: 'Voice assistant' })
     expect(FakeRecognition.instances).toHaveLength(1)
     expect(within(panel).getByText('Listening…')).toBeInTheDocument()
     expect(within(panel).getByText('Alt+Shift+V')).toBeInTheDocument()
@@ -274,5 +274,59 @@ describe('voice assistant UI', () => {
     })
     await waitFor(() => expect(within(panel).getByRole('region', { name: 'Latest command' })).toHaveTextContent('The camera is on.'))
     expect(handler).toHaveBeenCalledWith('startCamera')
+  })
+
+  it('shows the privacy disclosure in the panel before anything is heard', async () => {
+    install()
+    setup()
+    const user = userEvent.setup()
+    const panel = await openPanel(user)
+    expect(FakeRecognition.instances).toHaveLength(0)
+    const note = within(panel).getByTestId('voice-privacy')
+    expect(note).toHaveTextContent("Voice recognition is done by your browser's speech service.")
+    expect(note).toHaveTextContent('your audio is sent to Google or Microsoft')
+    expect(note).toHaveTextContent('Typed commands stay on this device. Third Eye does not store audio.')
+    expect(within(panel).getByText(/best effort/)).toBeInTheDocument()
+  })
+
+  it('does not repeat a reply in the live region when it was spoken aloud', async () => {
+    install()
+    setup()
+    const user = userEvent.setup()
+    const panel = await openPanel(user)
+    // wait until settings (voice on) have loaded, so speech is enabled
+    await waitFor(async () => {
+      await typeCommand(user, panel, 'open dashboard')
+      expect(spoken).toContain('Opening the dashboard.')
+    })
+    expect(screen.getByTestId('voice-live')).toHaveTextContent('')
+  })
+
+  it('keeps the reply in the live region when spoken feedback is off', async () => {
+    install()
+    setup({ feedback: false })
+    const user = userEvent.setup()
+    const panel = await openPanel(user)
+    await typeCommand(user, panel, 'open dashboard')
+    await waitFor(() => expect(screen.getByTestId('voice-live')).toHaveTextContent('Opening the dashboard.'))
+    expect(spoken).toEqual([])
+  })
+
+  it('keeps the reply in the live region when the voice assistant is disabled', async () => {
+    install()
+    setup({ enabled: false })
+    const user = userEvent.setup()
+    const panel = await openPanel(user)
+    await typeCommand(user, panel, 'open navigation')
+    await waitFor(() => expect(screen.getByTestId('voice-live')).toHaveTextContent('Opening Navigation.'))
+  })
+
+  it('go back with no history says there is nothing to go back to', async () => {
+    install()
+    setup()
+    const user = userEvent.setup()
+    const panel = await openPanel(user)
+    await typeCommand(user, panel, 'go back')
+    await waitFor(() => expect(within(panel).getByRole('region', { name: 'Latest command' })).toHaveTextContent('There is nothing to go back to.'))
   })
 })

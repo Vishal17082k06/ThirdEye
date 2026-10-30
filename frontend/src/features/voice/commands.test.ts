@@ -62,7 +62,12 @@ const POSITIVE: Array<[string, Intent]> = [
   ['cancel', 'cancel'],
   ['never mind', 'cancel'],
   ['yes', 'yes'],
-  ['confirm', 'yes'],
+  ['okay', 'yes'],
+  ['sure', 'yes'],
+  ['confirm', 'confirm'],
+  ['send it', 'confirm'],
+  ['yes confirm', 'confirm'],
+  ['send now', 'confirm'],
   ['Yes, please.', 'yes'],
   ['no', 'no'],
   ['nope', 'no'],
@@ -96,6 +101,7 @@ const NEGATIVE = [
   'read my mail',
   'walk the dog',
   'go',
+  'send the report',
 ]
 
 describe('parseCommand: every supported phrase', () => {

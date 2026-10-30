@@ -33,7 +33,8 @@ export function VoiceButton() {
 
   const listening = v?.listening ?? false
   // What a screen reader hears. The region is always mounted so the first message is not missed.
-  const live = listening ? 'Listening… say a command.' : v?.error ?? v?.last?.response ?? ''
+  // A reply that was spoken aloud is not repeated here; everything else (and every reply when speech is off) is.
+  const live = listening ? 'Listening… say a command.' : v?.error ?? (v?.last?.spoken ? '' : v?.last?.response) ?? ''
   const liveKey = listening ? 'listening' : v?.error ? `e-${v.error}` : `r-${v?.last?.id ?? 0}`
 
   return (
@@ -43,7 +44,6 @@ export function VoiceButton() {
         aria-label="Voice assistant"
         aria-expanded={open}
         aria-controls={panelId}
-        aria-haspopup="dialog"
         title={`Voice assistant (${SHORTCUT_LABEL})`}
         disabled={!v}
         onClick={() => v?.setOpen(!open)}
@@ -66,7 +66,7 @@ export function VoiceButton() {
       {open && v && (
         <div
           id={panelId}
-          role="dialog"
+          role="region"
           aria-label="Voice assistant"
           className="bw absolute right-0 top-full z-40 mt-2 max-h-[min(80vh,42rem)] w-[min(26rem,calc(100vw-1.5rem))] overflow-y-auto rounded-2xl border-line bg-surface p-4 shadow-pop"
         >

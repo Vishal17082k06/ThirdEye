@@ -27,6 +27,7 @@ export type Intent =
   | 'stop_listening'
   | 'cancel'
   | 'yes'
+  | 'confirm'
   | 'no'
   | 'choose'
   | 'help'
@@ -104,8 +105,14 @@ const RULES: Rule[] = [
   },
   { intent: 'cancel', re: /^(?:cancel|never mind|nevermind|forget it|abort|stop that|dont|do not)$/ },
   {
+    // Generic agreement: enough for navigation and calling, never for sending a real SOS.
     intent: 'yes',
-    re: /^(?:yes|yeah|yep|yup|confirm|confirmed|sure|do it|go ahead|send|send it|affirmative|proceed|yes confirm|yes send|yes call)$/,
+    re: /^(?:yes|yeah|yep|yup|ok|okay|sure|do it|go ahead|affirmative|proceed|yes call)$/,
+  },
+  {
+    // Deliberate words: the only ones that confirm a real emergency alert (they also confirm anything else).
+    intent: 'confirm',
+    re: /^(?:confirm|confirmed|yes confirm|send it|yes send|send now|send)$/,
   },
   { intent: 'no', re: /^(?:no|nope|nah|negative|no thanks|dont do it|do not do it)$/ },
   { intent: 'help', re: /^(?:help|what can i say|what can you do|show commands|list commands|show help|voice help)$/ },
@@ -211,6 +218,7 @@ const INTENT_LABEL: Record<Intent, string> = {
   stop_listening: 'Stop listening',
   cancel: 'Cancel',
   yes: 'Yes',
+  confirm: 'Confirm',
   no: 'No',
   choose: 'Choose an option',
   help: 'Show help',

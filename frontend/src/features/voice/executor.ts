@@ -44,6 +44,8 @@ export interface ExecutorDeps {
     cancel: () => void
   }
   readScreen: () => string
+  /** Best effort: is there a page to go back to? */
+  canGoBack: () => boolean
   dial: (href: string) => void
 }
 
@@ -255,9 +257,11 @@ export function createExecutor(getDeps: () => ExecutorDeps, opts: { timeoutMs?: 
           return done(parsed, 'Emergency alerts are not set up yet: add a guardian email first. Opening the SOS page. Nothing was sent.', false)
         }
         d.sos.requestSend()
-        return done(parsed, 'Opening emergency alert confirmation. Say confirm or tap Send now.', true, { awaiting: true })
+        // The dialog is the question: no Yes/No buttons of our own that could go stale.
+        return done(parsed, 'Opening emergency alert confirmation. Say confirm or tap Send now.')
       }
       case 'go_back':
+        if (!d.canGoBack()) return done(parsed, 'There is nothing to go back to.', false)
         d.navigate(-1)
         return done(parsed, 'Going back.')
       case 'stop_listening':
@@ -265,6 +269,9 @@ export function createExecutor(getDeps: () => ExecutorDeps, opts: { timeoutMs?: 
       case 'help':
         return done(parsed, 'You can say: open dashboard, start camera, where am I, take me to a place, check device status, call guardian, or emergency SOS. The full list is on screen.', true, { showHelp: true })
       case 'yes':
+        if (d.sos.confirmOpen()) return done(parsed, 'To send the alert, say confirm, or tap Send now.', false)
+        return done(parsed, 'There is nothing to confirm.', false)
+      case 'confirm':
         if (d.sos.confirmOpen()) {
           d.sos.confirm()
           return done(parsed, 'Sending the emergency alert now. The dialog will show whether it was delivered.')
@@ -301,9 +308,9 @@ export function createExecutor(getDeps: () => ExecutorDeps, opts: { timeoutMs?: 
           if (!place) return { ...ask(p, `There are only ${p.options.length} options. Say a number from 1 to ${p.options.length}, or say cancel.`, parsed), choices: p.options.length }
           return ask({ kind: 'nav', place }, `Start navigation to ${shortLabel(place.label)}? Say yes or no.`, parsed)
         }
-        if (intent === 'yes') return { ...ask(p, 'Please say the number of the place, or say cancel.', parsed), choices: p.options.length }
+        if (intent === 'yes' || intent === 'confirm') return { ...ask(p, 'Please say the number of the place, or say cancel.', parsed), choices: p.options.length }
       } else if (p.kind === 'nav' || p.kind === 'call') {
-        if (intent === 'yes') {
+        if (intent === 'yes' || intent === 'confirm') {
           clearPending()
           if (p.kind === 'nav') return startNavigation(parsed, p.place)
           const phone = p.phone.replace(/[^\d+]/g, '')

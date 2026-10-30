@@ -32,6 +32,7 @@ function makeDeps(over: Partial<ExecutorDeps> = {}) {
     getGuardian: vi.fn(async () => ({ name: 'Meera', phone: '+91 98765 43210' })),
     sos: { live: true, ready: true, requestSend: vi.fn(), confirmOpen: vi.fn(() => false), confirm: vi.fn(), cancel: vi.fn() },
     readScreen: vi.fn(() => 'This is the Dashboard page.'),
+    canGoBack: vi.fn(() => true),
     dial: vi.fn(),
     ...over,
   }
@@ -68,6 +69,13 @@ describe('pages and back', () => {
     const { deps, ex } = setup()
     await ex.execute('go back')
     expect(deps.navigate).toHaveBeenCalledWith(-1)
+  })
+
+  it('go back says so when there is nothing to go back to', async () => {
+    const { deps, ex } = setup({ canGoBack: vi.fn(() => false) })
+    const r = await ex.execute('go back')
+    expect(r.text).toBe('There is nothing to go back to.')
+    expect(deps.navigate).not.toHaveBeenCalled()
   })
 })
 
@@ -353,6 +361,25 @@ describe('Emergency SOS never auto-sends', () => {
     expect(deps.sos.requestSend).toHaveBeenCalledOnce()
     expect(deps.sos.confirm).not.toHaveBeenCalled()
     expect(r.text).toBe('Opening emergency alert confirmation. Say confirm or tap Send now.')
+  })
+
+  it('opening the SOS dialog sets no awaiting state (no stale Yes/No buttons)', async () => {
+    const { ex } = setup()
+    expect((await ex.execute('emergency SOS')).awaiting).toBeUndefined()
+  })
+
+  it('generic yes-words never confirm a real SOS, only deliberate ones do', async () => {
+    for (const word of ['yes', 'sure', 'do it', 'go ahead', 'proceed', 'okay']) {
+      const open = setup({ sos: { live: true, ready: true, requestSend: vi.fn(), confirmOpen: vi.fn(() => true), confirm: vi.fn(), cancel: vi.fn() } })
+      const r = await open.ex.execute(word)
+      expect(r.text).toBe('To send the alert, say confirm, or tap Send now.')
+      expect(open.deps.sos.confirm).not.toHaveBeenCalled()
+    }
+    for (const word of ['confirm', 'yes confirm', 'send it', 'yes send', 'send now']) {
+      const open = setup({ sos: { live: true, ready: true, requestSend: vi.fn(), confirmOpen: vi.fn(() => true), confirm: vi.fn(), cancel: vi.fn() } })
+      await open.ex.execute(word)
+      expect(open.deps.sos.confirm).toHaveBeenCalledOnce()
+    }
   })
 
   it('"yes" only confirms while the dialog is open', async () => {

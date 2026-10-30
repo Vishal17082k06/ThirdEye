@@ -11,6 +11,8 @@ export interface VoiceEntry {
   response: string
   ok: boolean
   via: 'voice' | 'typed' | 'button'
+  /** The reply was actually spoken aloud, so screen readers must not be told it again. */
+  spoken: boolean
 }
 
 export interface VoiceApi {
@@ -36,6 +38,9 @@ export interface VoiceApi {
 }
 
 export const SHORTCUT_LABEL = 'Alt+Shift+V'
+
+export const VOICE_PRIVACY_NOTICE =
+  "Voice recognition is done by your browser's speech service. In Chrome and Edge your audio is sent to Google or Microsoft to be turned into text. Typed commands stay on this device. Third Eye does not store audio."
 
 export const VoiceContext = createContext<VoiceApi | null>(null)
 

@@ -91,15 +91,23 @@ export function VoiceProvider({ children }: { children: ReactNode }) {
       cancel: sos.cancel,
     },
     readScreen: () => readScreen(document),
+    canGoBack: () => {
+      const idx = (window.history.state as { idx?: number } | null)?.idx
+      return typeof idx === 'number' ? idx > 0 : window.history.length > 1
+    },
     dial: (href) => {
       window.location.href = href
     },
   }
 
   const speakRef = useRef(speech.speak)
+  const voiceOnRef = useRef(speech.voiceEnabled)
+  voiceOnRef.current = speech.voiceEnabled
   speakRef.current = speech.speak
 
   const present = useCallback((reply: Reply, heard: string, via: VoiceEntry['via']) => {
+    // Whether it really was spoken decides if the live region repeats it (it must not say it twice).
+    const spoken = reply.alreadySpoken ? voiceOnRef.current : speakRef.current(reply.text, { interrupt: true, rank: SPEECH_RANK })
     const entry: VoiceEntry = {
       id: nextId.current++,
       heard,
@@ -107,12 +115,12 @@ export function VoiceProvider({ children }: { children: ReactNode }) {
       response: reply.text,
       ok: reply.ok,
       via,
+      spoken,
     }
     setHistory((h) => [entry, ...h].slice(0, HISTORY_LIMIT))
     setAwaiting(reply.awaiting ? { choices: reply.choices ?? 0 } : null)
     if (reply.showHelp) setShowHelp(true)
     setNotice(null)
-    if (!reply.alreadySpoken) speakRef.current(reply.text, { interrupt: true, rank: SPEECH_RANK })
   }, [])
 
   const presentRef = useRef(present)

@@ -56,7 +56,7 @@ Navigation and Book a Ride show OpenStreetMap tiles (`https://tile.openstreetmap
 
 ## Voice commands
 
-Press the microphone in the top bar, or **Alt+Shift+V**, then speak (Chrome, Edge or Safari). Firefox has no speech recognition; type the same commands in the panel's "Type a command" box. It only listens after you press, one command at a time, and never records audio.
+Press the microphone in the top bar, or **Alt+Shift+V**, then speak (Chrome, Edge or Safari). Firefox has no speech recognition; type the same commands in the panel's "Type a command" box. It only listens after you press and takes one command at a time. This app never stores audio, but your browser's speech service does the recognition: in Chrome and Edge your audio is sent to Google or Microsoft to be turned into text. Typed commands stay on this device. Alt+Shift+V is best effort (some systems use it to switch keyboard layout); typed commands always work.
 
 | Say | What happens |
 | --- | --- |

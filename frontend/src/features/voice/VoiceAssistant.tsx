@@ -4,7 +4,7 @@ import { Link } from 'react-router-dom'
 import { Button, Input } from '../../design'
 import { cn } from '../../lib/cn'
 import { COMMAND_HELP } from './commands'
-import { SHORTCUT_LABEL, useVoiceAssistant } from './voiceContext'
+import { SHORTCUT_LABEL, VOICE_PRIVACY_NOTICE, useVoiceAssistant } from './voiceContext'
 
 /** The assistant's panel: microphone, what was heard, what it was understood as, the answer, typing and help. */
 export function VoiceAssistant() {
@@ -43,8 +43,9 @@ export function VoiceAssistant() {
           <p className="text-lg font-bold text-ink">Voice assistant</p>
           <p className="mt-0.5 flex items-center gap-1.5 text-sm text-muted">
             <Keyboard className="h-4 w-4" aria-hidden="true" />
-            Shortcut: <kbd className="bw rounded-md border-line-strong bg-surface-muted px-1.5 py-0.5 font-mono text-xs text-ink">{SHORTCUT_LABEL}</kbd>
+            Shortcut (best effort): <kbd className="bw rounded-md border-line-strong bg-surface-muted px-1.5 py-0.5 font-mono text-xs text-ink">{SHORTCUT_LABEL}</kbd>
           </p>
+          <p className="mt-0.5 text-xs text-muted">Some systems use Alt+Shift for another purpose (such as switching keyboard layout). Typed commands always work.</p>
         </div>
       </div>
 
@@ -80,6 +81,10 @@ export function VoiceAssistant() {
           {v.interim && <p className="mt-1 truncate text-sm italic text-muted">“{v.interim}”</p>}
         </div>
       </div>
+
+      <p className="text-sm text-muted" data-testid="voice-privacy">
+        {VOICE_PRIVACY_NOTICE}
+      </p>
 
       {/* Honest notices */}
       {!v.enabled && (

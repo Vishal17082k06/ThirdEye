@@ -299,6 +299,9 @@ export function VoiceSection({ settings }: { settings: Settings['voice'] }) {
         await update.mutateAsync({ voice: { enabled: v.enabled, rate: v.rate, voiceName: v.voiceName || null, feedback: v.feedback } })
       }}
     >
+      <p className="text-sm text-muted">
+        Voice recognition is done by your browser's speech service. In Chrome and Edge your audio is sent to Google or Microsoft to be turned into text. Typed commands stay on this device. Third Eye does not store audio.
+      </p>
       <Switch label="Enable voice assistant" checked={v.enabled} onChange={(enabled) => setV({ ...v, enabled })} />
       <Switch label="Spoken feedback" description="Announce detections and navigation steps aloud." checked={v.feedback} onChange={(feedback) => setV({ ...v, feedback })} />
       <Slider label="Speech rate" min={0.5} max={2} step={0.1} value={v.rate} display={`${v.rate.toFixed(1)}x`} onChange={(rate) => setV({ ...v, rate: Math.round(rate * 10) / 10 })} />

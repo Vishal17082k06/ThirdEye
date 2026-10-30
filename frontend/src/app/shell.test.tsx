@@ -82,7 +82,7 @@ describe('Topbar', () => {
       { mode: 'simulation' },
     )
     await userEvent.click(screen.getByRole('button', { name: 'Voice assistant' }))
-    const panel = screen.getByRole('dialog', { name: 'Voice assistant' })
+    const panel = screen.getByRole('region', { name: 'Voice assistant' })
     expect(within(panel).getByRole('button', { name: 'Start listening' })).toBeInTheDocument()
     expect(within(panel).getByLabelText('Type a command')).toBeInTheDocument()
   })
