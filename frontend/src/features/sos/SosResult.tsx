@@ -13,6 +13,10 @@ interface SosResultProps {
   /** A request is in flight and no record has come back yet. */
   sending: { startedAt: number | null; waitingForLocation: boolean } | null
   onSendAgain: () => void
+  /** 'dialog' has no history on screen, so it points to the Emergency SOS page instead of "below". */
+  where?: 'dialog' | 'page'
+  /** The same content was already announced by the dialog: keep it visible but do not announce it again. */
+  silent?: boolean
   guardianPhone: string | null
   onRetry: (id: number) => void
 }
@@ -46,15 +50,19 @@ function Elapsed({ since }: { since: number | null }) {
   return <span>{since ? Math.max(0, Math.floor((now - since) / 1000)) : 0} s</span>
 }
 
-export function SosResult({ record, error, busy, sending, guardianPhone, onRetry, onSendAgain }: SosResultProps) {
+function unknownText(message: string, where: 'dialog' | 'page'): string {
+  return where === 'dialog' ? message.replace('check SOS history below.', 'check the SOS history on the Emergency SOS page.') : message
+}
+
+export function SosResult({ record, error, busy, sending, guardianPhone, onRetry, onSendAgain, where = 'page', silent = false }: SosResultProps) {
   let body = null
   if (error) {
     const unknown = error.kind === 'unknown'
     body = (
-      <div role="alert" className="bw space-y-3 rounded-2xl border-danger bg-danger-soft p-5 text-danger">
+      <div className="bw space-y-3 rounded-2xl border-danger bg-danger-soft p-5 text-danger">
         <p className="flex items-start gap-3 text-lg font-bold">
           <AlertCircle className="mt-0.5 h-6 w-6 shrink-0" aria-hidden="true" />
-          <span>{error.message}</span>
+          <span>{unknown ? unknownText(error.message, where) : error.message}</span>
         </p>
         <div className="flex flex-col gap-3 sm:flex-row">
           <CallLink phone={guardianPhone} />
@@ -73,9 +81,7 @@ export function SosResult({ record, error, busy, sending, guardianPhone, onRetry
           <Spinner size="sm" label="" />
           <span>{sending.waitingForLocation ? 'Sending without location in a moment…' : 'Sending…'}</span>
         </p>
-        <p className="font-semibold">
-          Elapsed <Elapsed since={sending.startedAt} />. This can take up to a minute.
-        </p>
+        <p className="font-semibold">This can take up to a minute.</p>
       </div>
     )
   } else if (record?.status === 'sent') {
@@ -93,7 +99,7 @@ export function SosResult({ record, error, busy, sending, guardianPhone, onRetry
     )
   } else if (record?.status === 'failed') {
     body = (
-      <div role="alert" className="bw space-y-3 rounded-2xl border-danger bg-danger-soft p-5 text-danger">
+      <div className="bw space-y-3 rounded-2xl border-danger bg-danger-soft p-5 text-danger">
         <p className="flex items-start gap-3 text-lg font-bold">
           <AlertCircle className="mt-0.5 h-6 w-6 shrink-0" aria-hidden="true" />
           <span>Alert NOT delivered. {record.delivery_message}</span>
@@ -128,9 +134,17 @@ export function SosResult({ record, error, busy, sending, guardianPhone, onRetry
       </div>
     )
   }
+  // One announcement mechanism: this polite status region. The ticking counter lives outside it, hidden from assistive tech.
   return (
-    <div role="status" aria-live="polite" aria-atomic="true" data-testid="sos-result">
-      {body}
-    </div>
+    <>
+      <div role="status" aria-live={silent ? 'off' : 'polite'} aria-atomic="true" data-testid="sos-result">
+        {body}
+      </div>
+      {!record && !error && sending && (
+        <p aria-hidden="true" data-testid="sos-elapsed" className="mt-2 text-sm font-semibold text-muted">
+          Elapsed <Elapsed since={sending.startedAt} />
+        </p>
+      )}
+    </>
   )
 }

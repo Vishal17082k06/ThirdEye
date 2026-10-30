@@ -1,5 +1,5 @@
 import { FlaskConical, MailWarning, MapPin, Phone } from 'lucide-react'
-import { useEffect } from 'react'
+import { useEffect, useRef } from 'react'
 import { Link } from 'react-router-dom'
 import { Badge, Card, CardHeader, Spinner, buttonClasses } from '../../design'
 import { cn } from '../../lib/cn'
@@ -26,6 +26,13 @@ export function SosPage() {
   const callHref = telHref(guardianPhone)
   const dialogOpen = state.open
   const sending = state.phase === 'sending'
+  // What the dialog last announced. When it closes, the page shows the same content without announcing it again;
+  // a later change (for example pending to sent) has a new key and is announced.
+  const key = `${state.error?.kind ?? ''}|${state.result ? `${state.result.id}:${state.result.status}:${state.result.attempts}` : ''}`
+  const announced = useRef<string | null>(null)
+  useEffect(() => {
+    if (dialogOpen) announced.current = key
+  }, [dialogOpen, key])
 
   return (
     <div className="space-y-6">
@@ -68,6 +75,7 @@ export function SosPage() {
         <div className="space-y-4">
           <div className="space-y-4">
             <SosResult
+              silent={!dialogOpen && announced.current === key}
               record={dialogOpen ? null : state.result}
               error={dialogOpen ? null : state.error}
               busy={sending}

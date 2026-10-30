@@ -93,9 +93,11 @@ export function useSosFlow(): SosFlow {
   return ctx
 }
 
-/** 4xx is the server saying no (nothing was sent). Network failure, timeout/abort and 5xx are unknown. */
+/** Only these statuses mean the server looked at the request and refused it. Everything else (408, 425, 5xx, network, abort) is unknown. */
+const REJECTED_STATUSES = new Set([400, 401, 403, 404, 409, 422, 429])
+
 function classify(err: unknown, retryId: number | null): SosError {
-  if (err instanceof ApiError && err.status >= 400 && err.status < 500) {
+  if (err instanceof ApiError && REJECTED_STATUSES.has(err.status)) {
     const message =
       err.status === 409
         ? 'The alert was not sent: it can no longer be retried; it may already be sending. The list has been refreshed.'

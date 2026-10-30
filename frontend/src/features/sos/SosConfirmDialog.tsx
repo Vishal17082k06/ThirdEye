@@ -76,6 +76,7 @@ export function SosConfirmDialog({ flow }: { flow: SosFlow }) {
           </>
         )}
         <SosResult
+          where="dialog"
           record={state.result}
           error={state.error}
           busy={sending}

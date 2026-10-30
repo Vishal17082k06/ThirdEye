@@ -257,7 +257,7 @@ describe('SOS confirm and send', () => {
   })
 })
 
-const UNKNOWN = /We could not confirm whether the alert was sent\. Do not assume it was\. Call your guardian now, and check SOS history below\./
+const UNKNOWN = /We could not confirm whether the alert was sent\. Do not assume it was\. Call your guardian now, and check (?:SOS history below|the SOS history on the Emergency SOS page)\./
 
 async function sendNow() {
   act(() => geo.fail(2))
@@ -274,6 +274,8 @@ describe('Unknown and rejected outcomes', () => {
       },
     ],
     ['502', () => fail(502, 'Bad gateway')],
+    ['408', () => fail(408, 'Request timeout')],
+    ['425', () => fail(425, 'Too early')],
     ['500', () => fail(500, 'boom')],
   ])('%s is an unknown outcome, never "not sent", and refetches the history', async (_n, handler) => {
     const api = setup({ extra: { 'POST /sos': handler } })
@@ -325,6 +327,10 @@ describe('Unknown and rejected outcomes', () => {
     [400, 'Add a guardian email in Profile before sending SOS.'],
     [409, 'Only a failed or stuck SOS can be retried.'],
     [422, 'note: too long'],
+    [401, 'Not authenticated'],
+    [403, 'Forbidden'],
+    [404, 'Not found'],
+    [429, 'Slow down'],
   ])('%s is a rejection with the server detail', async (code, detail) => {
     setup({ extra: { 'POST /sos': fail(code, detail) } })
     await sendNow()
@@ -368,7 +374,7 @@ describe('Send guards and live regions', () => {
   it('Esc and the close button do not dismiss the dialog while sending', async () => {
     setup({ extra: { 'POST /sos': () => new Promise(() => {}) } })
     await sendNow()
-    expect(await screen.findByText(/This can take up to a minute/)).toBeInTheDocument()
+    expect(await screen.findByText(/can take up to a minute/i)).toBeInTheDocument()
     await userEvent.keyboard('{Escape}')
     await userEvent.click(screen.getByRole('button', { name: 'Close dialog' }))
     expect(screen.getByRole('dialog', { name: 'Sending emergency alert' })).toBeInTheDocument()
@@ -387,11 +393,51 @@ describe('Send guards and live regions', () => {
     expect(region).toBeEmptyDOMElement()
   })
 
-  it('failed content is announced as an alert inside the permanent region', async () => {
+  it('failed content is announced by exactly one mechanism: the polite status region, with no nested alert', async () => {
     setup({ postResult: failed() })
     await sendNow()
     const region = within(screen.getByRole('dialog')).getByTestId('sos-result')
-    expect(await within(region).findByRole('alert')).toHaveTextContent(/not delivered/i)
+    expect(await within(region).findByText(/not delivered/i)).toBeInTheDocument()
+    expect(region).toHaveAttribute('aria-live', 'polite')
+    expect(within(region).queryByRole('alert')).not.toBeInTheDocument()
+  })
+
+  it('the ticking elapsed counter is outside the live region and hidden, and the live text does not change as it ticks', async () => {
+    setup({ extra: { 'POST /sos': () => new Promise(() => {}) } })
+    vi.useFakeTimers({ shouldAdvanceTime: true })
+    await sendNow()
+    const region = within(screen.getByRole('dialog')).getByTestId('sos-result')
+    expect(within(region).getByText('This can take up to a minute.')).toBeInTheDocument()
+    const elapsed = screen.getByTestId('sos-elapsed')
+    expect(elapsed).toHaveAttribute('aria-hidden', 'true')
+    expect(region.contains(elapsed)).toBe(false)
+    const before = region.textContent
+    const tick = elapsed.textContent
+    await act(() => vi.advanceTimersByTimeAsync(3500))
+    expect(screen.getByTestId('sos-elapsed').textContent).not.toBe(tick)
+    expect(region.textContent).toBe(before)
+  })
+
+  it('wording points to the page history inside the dialog and says below on the page', async () => {
+    setup({ extra: { 'POST /sos': () => fail(502, 'x') } })
+    await sendNow()
+    const d = screen.getByRole('dialog')
+    expect(await within(d).findByText(/check the SOS history on the Emergency SOS page\./)).toBeInTheDocument()
+    await userEvent.click(within(d).getByRole('button', { name: 'Close' }))
+    expect(await screen.findByText(/check SOS history below\./)).toBeInTheDocument()
+  })
+
+  it('does not announce the same content twice when the dialog closes, but announces a later change', async () => {
+    const pending = rec({ status: 'pending', sent_at: null, delivery_message: 'Sending…' })
+    let settled = false
+    setup({ postResult: pending, initial: [pending], extra: { 'GET /sos/7': () => (settled ? rec() : pending) } })
+    await sendNow()
+    await userEvent.click(await screen.findByRole('button', { name: 'Close dialog' }))
+    const region = () => screen.getAllByTestId('sos-result')[0]
+    expect(region()).toHaveAttribute('aria-live', 'off')
+    settled = true
+    await within(region()).findByText(ACCEPTED, {}, { timeout: 5000 })
+    expect(region()).toHaveAttribute('aria-live', 'polite')
   })
 
   it('a pending result is followed after the dialog is closed and the page shows the late outcome', async () => {
